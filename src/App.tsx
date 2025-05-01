@@ -5,13 +5,16 @@ import { useAuthStore } from './stores/authStore';
 import { LoginPage } from './pages/LoginPage';
 import { AdminPage } from './pages/AdminPage';
 import { SearchPage } from './pages/SearchPage';
-import { Header } from './components/Header';
+import { QBittorrentPage } from './pages/QBittorrentPage';
+import { AddTorrentPage } from './pages/AddTorrentPage';
+import { MediaDetailPage } from './pages/MediaDetailPage';
+import { Header } from './components/core/Header';
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: Infinity, // Les données ne deviennent jamais périmées automatiquement
-      cacheTime: Infinity, // Le cache ne expire jamais automatiquement
+      gcTime: Infinity, // Le garbage collector ne nettoie jamais le cache automatiquement (remplace cacheTime qui est obsolète)
       retry: 3,
       refetchOnWindowFocus: false, // Pas de rechargement quand on change de fenêtre
       refetchOnMount: true, // Permettre le chargement au montage initial
@@ -52,6 +55,22 @@ export function App() {
               }
             />
             <Route
+              path="/"
+              element={
+                <PrivateRoute>
+                  <SearchPage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/media/:type/:id"
+              element={
+                <PrivateRoute>
+                  <MediaDetailPage />
+                </PrivateRoute>
+              }
+            />
+            <Route
               path="/admin"
               element={
                 <AdminRoute>
@@ -60,10 +79,18 @@ export function App() {
               }
             />
             <Route
-              path="/"
+              path="/qbittorrent"
               element={
                 <PrivateRoute>
-                  <SearchPage />
+                  <QBittorrentPage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/add-torrent"
+              element={
+                <PrivateRoute>
+                  <AddTorrentPage />
                 </PrivateRoute>
               }
             />

@@ -1,8 +1,8 @@
-version: '3'
+
 services:
-  prowlarr-search:
+  search-torrent:
     build: .
-    container_name: prowlarr-search
+    container_name: search-torrent
     ports:
       - "80:80"
     volumes:

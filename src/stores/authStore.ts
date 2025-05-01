@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { db } from '../lib/db';
+import { db } from '../services/database';
 import { QueryClient } from '@tanstack/react-query';
 
 // Créer une instance de QueryClient pour l'utiliser dans le store
@@ -64,7 +64,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       return true;
     } catch (error) {
-      console.error('Erreur lors de la connexion:', error);
+      "console.error('Erreur lors de la connexion:', error);"
       return false;
     }
   },

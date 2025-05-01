@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { UserPlus, Settings, Users, Rss } from 'lucide-react';
-import { db } from '../lib/db';
-import { globalSettings } from '../lib/settings';
-import { UserSettingsModal } from '../components/UserSettingsModal';
-import { AdminRssFeedManager } from '../components/AdminRssFeedManager';
 import { useAuthStore } from '../stores/authStore';
+
+// Imports des composants depuis la nouvelle structure
+import { UserSettingsModal } from '../components/settings/UserSettingsModal';
+import { AdminRssFeedManager } from '../components/rss/AdminRssFeedManager';
+
+// Imports des services depuis la nouvelle structure
+import { db } from '../services/database';
+import { globalSettings } from '../services/settings';
 
 interface User {
   id: string;

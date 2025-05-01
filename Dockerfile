@@ -8,6 +8,8 @@ COPY package*.json ./
 
 # Install dependencies
 RUN npm ci
+# Installer explicitement la dépendance manquante pour Alpine Linux
+RUN npm install @rollup/rollup-linux-x64-musl
 
 # Copy source code
 COPY . .
