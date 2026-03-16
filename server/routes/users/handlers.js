@@ -98,7 +98,7 @@ export async function getUserByIdHandler(req, res) {
     
     // Vérifier si l'utilisateur qui fait la requête est admin ou l'utilisateur demandé
     if (!req.user.is_admin && req.user.id !== id) {
-      return res.status(403).json({ error: 'Accès refusé' });
+      return res.status(403).json({ error: 'Action non autorisée' });
     }
     
     const user = await userService.getUserById(id);
@@ -124,7 +124,7 @@ export async function updateUserHandler(req, res) {
     
     // Vérifier si l'utilisateur qui fait la requête est admin ou l'utilisateur demandé
     if (!req.user.is_admin && req.user.id !== id) {
-      return res.status(403).json({ error: 'Accès refusé' });
+      return res.status(403).json({ error: 'Action non autorisée' });
     }
     
     // Vérifier que l'utilisateur existe

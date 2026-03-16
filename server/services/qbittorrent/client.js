@@ -3,6 +3,96 @@ import fetch from 'node-fetch';
 import { URLSearchParams } from 'url';
 import { get as getDb } from '../../services/core/db.js';
 
+function isHttpUrl(value) {
+  return typeof value === 'string' && /^https?:\/\//i.test(value);
+}
+
+function looksLikeProwlarrDownloadUrl(value) {
+  if (!isHttpUrl(value)) return false;
+  try {
+    const u = new URL(value);
+    if (u.searchParams.has('apikey')) return true;
+    if (/\/download$/i.test(u.pathname)) return true;
+    if (/\/\d+\/download$/i.test(u.pathname)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveProwlarrDownloadRedirect(url) {
+  // Some indexers/Prowlarr endpoints redirect to magnet: links.
+  // We must NOT follow them with node-fetch, since magnet is not an HTTP scheme.
+  console.log(`[qBit] Résolution lien Prowlarr: ${url.substring(0, 80)}...`);
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      redirect: 'manual',
+      timeout: 15000
+    });
+
+    console.log(`[qBit] Réponse Prowlarr: status=${response.status}`);
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location') || '';
+      console.log(`[qBit] Redirect vers: ${location.substring(0, 80)}...`);
+      if (location.startsWith('magnet:?')) {
+        return { type: 'magnet', value: location };
+      }
+      if (isHttpUrl(location)) {
+        return { type: 'url', value: location };
+      }
+      return null;
+    }
+
+    // If 200 OK, it might be a .torrent file - try to download and send as file
+    if (response.status === 200) {
+      const contentType = response.headers.get('content-type') || '';
+      console.log(`[qBit] Content-Type: ${contentType}`);
+      if (contentType.includes('application/x-bittorrent') || contentType.includes('octet-stream')) {
+        // Return the original URL - qBittorrent should be able to fetch it
+        return { type: 'torrent_url', value: url };
+      }
+    }
+
+    // No redirect: keep the original URL.
+    return { type: 'url', value: url };
+  } catch (err) {
+    console.error(`[qBit] Erreur résolution Prowlarr:`, err.message);
+    // Return original URL as fallback
+    return { type: 'url', value: url };
+  }
+}
+
+function normalizeMagnet(input) {
+  if (typeof input !== 'string') return input;
+  if (!input.startsWith('magnet:?')) return input;
+
+  const m = input.match(/xt=urn:btih:([a-zA-Z0-9]+)/);
+  if (!m) return input;
+  const btih = m[1];
+
+  const isHex = /^[0-9a-fA-F]+$/.test(btih);
+  if (!isHex) return input;
+
+  if (btih.length === 40) {
+    return input.replace(/xt=urn:btih:[a-zA-Z0-9]+/, `xt=urn:btih:${btih.toLowerCase()}`);
+  }
+
+  if (btih.length === 80) {
+    try {
+      const decoded = Buffer.from(btih, 'hex').toString('utf8');
+      if (/^[0-9a-fA-F]{40}$/.test(decoded)) {
+        return input.replace(/xt=urn:btih:[a-zA-Z0-9]+/, `xt=urn:btih:${decoded.toLowerCase()}`);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  return input;
+}
+
 /**
  * Obtient les informations qBittorrent de l'utilisateur
  * @param {Object} db - Instance de la base de données (paramètre ignoré)
@@ -11,33 +101,81 @@ import { get as getDb } from '../../services/core/db.js';
  */
 export async function getQBitUserInfo(db, userId) {
   try {
-    // console.log('Diagnostic DB - userId recherché:', userId);
-    
-    // Vérifier si l'utilisateur existe
-    // console.log('Vérification si l\'utilisateur existe...');
-    const userExists = await getDb('SELECT id, username FROM users WHERE id = ?', [userId]);
-    // console.log('Utilisateur trouvé dans la base:', userExists ? 'Oui' : 'Non', userExists ? JSON.stringify(userExists) : '');
-    
-    // Vérifier la structure de la table users
-    // console.log('Vérification de la structure de la table users...');
-    const tableInfo = await getDb("PRAGMA table_info('users')");
-    // console.log('Structure de la table users:', JSON.stringify(tableInfo));
-    
-    // Rechercher toutes les colonnes qbit_* dans la table users
-    // console.log('Recherche de toutes les colonnes commençant par qbit_...');
-    const qbitColumns = await getDb("SELECT name FROM pragma_table_info('users') WHERE name LIKE 'qbit_%'");
-    // console.log('Colonnes qbit_ trouvées:', JSON.stringify(qbitColumns));
-    
-    // Requête originale pour récupérer les paramètres qBittorrent
-    // console.log('Exécution de la requête originale...');
     const row = await getDb('SELECT qbit_url, qbit_username, qbit_password FROM users WHERE id = ?', [userId]);
-    // console.log('Résultat requête originale:', row ? JSON.stringify(row) : 'null');
     
     return row || {};
   } catch (error) {
     console.error('Erreur lors de la récupération des informations qBittorrent:', error);
     throw error;
   }
+}
+
+export async function addTorrentUrlForUser(userId, urlOrMagnet, options = {}) {
+  const user = await getQBitUserInfo(null, userId);
+  if (!user?.qbit_url) {
+    throw new Error('URL qBittorrent non configurée');
+  }
+
+  const qbitUrl = user.qbit_url.trim().replace(/\/+$/, '');
+  const cookies = await authenticateQBittorrent(qbitUrl, user.qbit_username, user.qbit_password);
+
+  if (typeof urlOrMagnet !== 'string' || !urlOrMagnet) {
+    throw new Error('Aucun lien torrent fourni');
+  }
+
+  let value = urlOrMagnet;
+  let magnetFromRedirect = false;
+
+  if (looksLikeProwlarrDownloadUrl(value)) {
+    const resolved = await resolveProwlarrDownloadRedirect(value);
+    if (resolved?.type === 'magnet' && typeof resolved.value === 'string') {
+      value = resolved.value;
+      magnetFromRedirect = true;
+    } else if (resolved?.type === 'url' && typeof resolved.value === 'string') {
+      value = resolved.value;
+    }
+  }
+
+  const isMagnet = typeof value === 'string' && value.startsWith('magnet:?');
+  if (isMagnet) {
+    value = normalizeMagnet(value);
+    // Private trackers: require trackers in magnet. Public trackers can redirect to magnet without tr=.
+    if (!magnetFromRedirect && !/([?&])tr=/.test(value)) {
+      throw new Error(
+        "Lien magnet incomplet: aucun tracker (paramètre tr=) trouvé. Sur les trackers privés, qBittorrent ne pourra pas récupérer les métadonnées."
+      );
+    }
+  }
+
+  const params = new URLSearchParams();
+  params.append('urls', value);
+
+  if (options?.category) {
+    params.append('category', String(options.category));
+  }
+  if (options?.tags) {
+    params.append('tags', String(options.tags));
+  }
+
+  console.log(`[qBit] Envoi à qBittorrent: ${value.substring(0, 80)}... cat=${options?.category || 'none'}`);
+
+  const qbResponse = await makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/add`, {
+    method: 'POST',
+    body: params,
+    headers: {
+      'Cookie': cookies,
+      'Referer': qbitUrl,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }
+  });
+
+  console.log(`[qBit] Réponse qBittorrent: "${qbResponse}"`);
+
+  if (qbResponse === 'Fails.') {
+    throw new Error("qBittorrent n'a pas pu ajouter le torrent");
+  }
+
+  return qbResponse;
 }
 
 /**

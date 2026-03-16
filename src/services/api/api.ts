@@ -10,16 +10,29 @@ class API {
   }
 
   private async handleResponse(response: Response) {
-    if (response.status === 403) {
-      // Token invalide ou expiré
-      useAuthStore.getState().logout();
-      window.location.href = '/login';
-      throw new Error('Session expirée. Veuillez vous reconnecter.');
+    if (response.status === 401 || response.status === 403) {
+      const body = await response.clone().json().catch(() => ({} as any));
+      const msg = String(body?.message || body?.error || '').toLowerCase();
+      const isAuthError =
+        response.status === 401 ||
+        msg.includes('token invalide') ||
+        msg.includes('token manquant') ||
+        msg.includes('jwt');
+
+      if (isAuthError) {
+        useAuthStore.getState().logout();
+        window.location.href = '/login';
+        throw new Error('Session expirée. Veuillez vous reconnecter.');
+      }
     }
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || 'Une erreur est survenue');
+      const errorBody = await response.json().catch(() => ({}));
+      const message = errorBody.message || errorBody.error || 'Une erreur est survenue';
+      const err = new Error(message);
+      (err as any).status = response.status;
+      (err as any).data = errorBody;
+      throw err;
     }
 
     return response;
@@ -30,6 +43,27 @@ class API {
       headers: this.getHeaders()
     });
     
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async autoSearchTvSeasonRequest(id: string) {
+    const response = await fetch(`/api/library/tv/${id}/auto-search`, {
+      method: 'POST',
+      headers: this.getHeaders()
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async autoSearchTvSeasonEpisodeRequest(id: string, payload: { episode_number: number }) {
+    const response = await fetch(`/api/library/tv/${id}/auto-search-episode`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(payload)
+    });
+
     await this.handleResponse(response);
     return response.json();
   }
@@ -77,6 +111,15 @@ class API {
       headers: this.getHeaders(),
     });
     
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async getClientSettings() {
+    const response = await fetch('/api/settings/client', {
+      headers: this.getHeaders(),
+    });
+
     await this.handleResponse(response);
     return response.json();
   }
@@ -238,6 +281,264 @@ class API {
     });
     
     return this.handleResponse(response);
+  }
+
+  async getLibrary() {
+    const response = await fetch('/api/library', {
+      headers: this.getHeaders()
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async addLibraryItem(payload: {
+    tmdb_id: number;
+    media_type: 'movie' | 'tv';
+    title: string;
+    poster_url?: string | null;
+    release_date?: string | null;
+  }) {
+    const response = await fetch('/api/library', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(payload)
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async deleteLibraryItem(id: string) {
+    const response = await fetch(`/api/library/${id}`,
+      {
+        method: 'DELETE',
+        headers: this.getHeaders()
+      }
+    );
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async searchLibraryRequest(id: string) {
+    const response = await fetch(`/api/library/${id}/search`, {
+      method: 'POST',
+      headers: this.getHeaders()
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async selectLibraryRequest(
+    id: string,
+    payload: {
+      name: string;
+      link: string;
+      size?: number;
+      seeds?: number;
+    }
+  ) {
+    const response = await fetch(`/api/library/${id}/select`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(payload)
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async sendLibraryRequestToQbit(id: string, payload?: { force?: boolean }) {
+    const response = await fetch(`/api/library/${id}/send-to-qbit`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: payload ? JSON.stringify(payload) : undefined
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async autoSearchLibraryRequest(id: string) {
+    const response = await fetch(`/api/library/${id}/auto-search`, {
+      method: 'POST',
+      headers: this.getHeaders()
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async getTvSeasonRequests() {
+    const response = await fetch('/api/library/tv', {
+      headers: this.getHeaders()
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async createTvSeasonRequests(payload: {
+    tmdb_id: number;
+    media_type: 'tv' | 'anime';
+    title: string;
+    poster_url?: string | null;
+    season_numbers: number[];
+  }) {
+    const response = await fetch('/api/library/tv', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(payload)
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async deleteTvSeasonRequest(id: string) {
+    const response = await fetch(`/api/library/tv/${id}`,
+      {
+        method: 'DELETE',
+        headers: this.getHeaders()
+      }
+    );
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async searchTvSeasonRequest(id: string) {
+    const response = await fetch(`/api/library/tv/${id}/search`, {
+      method: 'POST',
+      headers: this.getHeaders()
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async searchTvSeasonRequestEpisode(id: string, payload: { episode_number: number }) {
+    const response = await fetch(`/api/library/tv/${id}/search-episode`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(payload)
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async selectTvSeasonRequest(
+    id: string,
+    payload: {
+      name: string;
+      link: string;
+      size?: number;
+      seeds?: number;
+    }
+  ) {
+    const response = await fetch(`/api/library/tv/${id}/select`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(payload)
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async sendTvSeasonRequestToQbit(id: string, payload?: { episode_number?: number; force?: boolean }) {
+    const response = await fetch(`/api/library/tv/${id}/send-to-qbit`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: payload ? JSON.stringify(payload) : undefined
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async getTvSeasonPresence(id: string) {
+    const response = await fetch(`/api/library/tv/${id}/presence`, {
+      headers: this.getHeaders()
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async getTvSeasonHistory(id: string) {
+    const response = await fetch(`/api/library/tv/${id}/history`, {
+      headers: this.getHeaders()
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async scanMediaInventoryNow() {
+    const response = await fetch('/api/media-inventory/scan', {
+      method: 'POST',
+      headers: this.getHeaders()
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async getMediaInventoryScanStatus() {
+    const response = await fetch('/api/media-inventory/scan/status', {
+      headers: this.getHeaders()
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async searchMovie(title: string, year?: string, tmdbId?: number) {
+    const response = await fetch('/api/prowlarr/search/movie', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ title, year, tmdbId })
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async searchTvEpisode(title: string, seasonNumber: number, episodeNumber: number, mediaType?: string) {
+    const response = await fetch('/api/prowlarr/search/tv/episode', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ title, seasonNumber, episodeNumber, mediaType })
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async searchTvSeries(title: string, mediaType?: string, tmdbId?: number) {
+    const response = await fetch('/api/prowlarr/search/tv', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ title, mediaType, tmdbId })
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async searchGeneral(query: string, category?: string) {
+    const response = await fetch('/api/prowlarr/search', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ query, category })
+    });
+
+    await this.handleResponse(response);
+    return response.json();
   }
 }
 

@@ -7,6 +7,7 @@ import {
   saveSettingHandler,
   deleteSettingHandler,
   getGlobalSettingsHandler,
+  getClientSettingsHandler,
   getPublicSettingsHandler,
   updateGlobalSettingsHandler
 } from './handlers.js';
@@ -17,6 +18,7 @@ const settingsRouter = express.Router();
 settingsRouter.get('/global', authenticateToken, requireAdmin, getGlobalSettingsHandler);
 settingsRouter.put('/global', authenticateToken, requireAdmin, updateGlobalSettingsHandler);
 settingsRouter.get('/public', authenticateToken, getPublicSettingsHandler);
+settingsRouter.get('/client', authenticateToken, getClientSettingsHandler);
 
 // Routes génériques pour tous les paramètres (admin uniquement)
 settingsRouter.get('/', authenticateToken, requireAdmin, getAllSettingsHandler);

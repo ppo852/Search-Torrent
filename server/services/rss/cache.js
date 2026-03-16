@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { get, run } from '../core/db.js';
-import { normalizeTitleForSearch } from './normalizer.js';
+import { normalizeTitleForSearch } from '../media-inventory/utils.js';
 
 /**
  * Récupère les données du cache RSS

@@ -54,9 +54,9 @@ export function detectCategory(category, title = '') {
   
   // Livres (7000-7999)
   if (categoryCode >= 7000 && categoryCode < 8000) return 'Livres';
-  
-  // Anime (8000-8999)
-  if (categoryCode >= 8000 && categoryCode < 9000) return 'Anime';
+ 
+  // Other (8000-8999)
+  if (categoryCode >= 8000 && categoryCode < 9000) return 'Autres';
   
   // Par défaut
   return 'Autres';

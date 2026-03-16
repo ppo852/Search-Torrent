@@ -37,7 +37,6 @@ export const useTorrentActions = ({ fetchTorrents }: UseTorrentActionsProps) => 
         
         return await response.json();
       } catch (error) {
-        "console.error('Erreur:', error);"
         throw error;
       }
     },
@@ -54,12 +53,12 @@ export const useTorrentActions = ({ fetchTorrents }: UseTorrentActionsProps) => 
         });
         
         if (!response.ok) {
-          throw new Error('Erreur lors de la reprise du torrent');
+          const details = await response.text().catch(() => '');
+          throw new Error(`Erreur lors de la reprise du torrent${details ? `: ${details}` : ''}`);
         }
         
         return await response.json();
       } catch (error) {
-        console.error('Erreur:', error);
         throw error;
       }
     },
@@ -84,7 +83,6 @@ export const useTorrentActions = ({ fetchTorrents }: UseTorrentActionsProps) => 
         
         return await response.json();
       } catch (error) {
-        console.error('Erreur:', error);
         throw error;
       }
     },
@@ -105,7 +103,6 @@ export const useTorrentActions = ({ fetchTorrents }: UseTorrentActionsProps) => 
         
         return await response.json();
       } catch (error) {
-        console.error('Erreur:', error);
         throw error;
       }
     },
@@ -126,7 +123,6 @@ export const useTorrentActions = ({ fetchTorrents }: UseTorrentActionsProps) => 
         
         return await response.json();
       } catch (error) {
-        "console.error('Erreur:', error);"
         throw error;
       }
     }
@@ -188,7 +184,6 @@ export const useTorrentActions = ({ fetchTorrents }: UseTorrentActionsProps) => 
       setSelectedTorrents(new Set());
       // Ne pas réinitialiser deleteWithFiles pour conserver le choix de l'utilisateur
     } catch (error) {
-      console.error('Erreur lors de la suppression:', error);
     }
   };
 
@@ -211,6 +206,7 @@ export const useTorrentActions = ({ fetchTorrents }: UseTorrentActionsProps) => 
     handleSingleDelete,
     handleMultipleDelete,
     confirmDelete,
-    cancelDelete
+    cancelDelete,
+    torrentToDelete
   };
 };

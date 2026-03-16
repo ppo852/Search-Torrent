@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { useSearchStore } from '../../stores/searchStore';
-import { Settings, LogOut, Home, Download, Menu, X } from 'lucide-react';
+import { Settings, LogOut, Home, Download, Menu, X, Bookmark, Search } from 'lucide-react';
 
 export function Header() {
   const { user, logout } = useAuthStore();
@@ -49,6 +49,24 @@ export function Header() {
               <Home size={20} />
               <span>Accueil</span>
             </button>
+            {user && (
+              <Link
+                to="/new-torrent"
+                className="flex items-center gap-2 px-3 py-1 text-gray-300 hover:text-white hover:bg-gray-700 rounded-md transition-colors"
+              >
+                <Search size={20} />
+                <span>Recherche</span>
+              </Link>
+            )}
+            {user && (
+              <Link
+                to="/library"
+                className="flex items-center gap-2 px-3 py-1 text-gray-300 hover:text-white hover:bg-gray-700 rounded-md transition-colors"
+              >
+                <Bookmark size={20} />
+                <span>Demandes</span>
+              </Link>
+            )}
             {user && (
               <Link
                 to="/qbittorrent"
@@ -106,6 +124,26 @@ export function Header() {
                 <Home size={20} />
                 <span>Accueil</span>
               </button>
+              {user && (
+                <Link
+                  to="/new-torrent"
+                  className="flex items-center gap-2 px-4 py-3 text-gray-300 hover:text-white hover:bg-gray-700 rounded-md transition-colors"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <Search size={20} />
+                  <span>Recherche</span>
+                </Link>
+              )}
+              {user && (
+                <Link
+                  to="/library"
+                  className="flex items-center gap-2 px-4 py-3 text-gray-300 hover:text-white hover:bg-gray-700 rounded-md transition-colors"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <Bookmark size={20} />
+                  <span>Demandes</span>
+                </Link>
+              )}
               {user && (
                 <Link
                   to="/qbittorrent"

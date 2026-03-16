@@ -4,10 +4,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuthStore } from './stores/authStore';
 import { LoginPage } from './pages/LoginPage';
 import { AdminPage } from './pages/AdminPage';
-import { SearchPage } from './pages/SearchPage';
+import { HomePage } from './pages/HomePage';
+import { NewTorrentPage } from './pages/NewTorrentPage';
 import { QBittorrentPage } from './pages/QBittorrentPage';
 import { AddTorrentPage } from './pages/AddTorrentPage';
 import { MediaDetailPage } from './pages/MediaDetailPage';
+import { LibraryPage } from './pages/LibraryPage';
+import { RequestDetailPage } from './pages/RequestDetailPage';
+import { TvShowRequestPage } from './pages/TvShowRequestPage';
 import { Header } from './components/core/Header';
 
 const queryClient = new QueryClient({
@@ -58,7 +62,15 @@ export function App() {
               path="/"
               element={
                 <PrivateRoute>
-                  <SearchPage />
+                  <HomePage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/new-torrent"
+              element={
+                <PrivateRoute>
+                  <NewTorrentPage />
                 </PrivateRoute>
               }
             />
@@ -91,6 +103,30 @@ export function App() {
               element={
                 <PrivateRoute>
                   <AddTorrentPage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/library"
+              element={
+                <PrivateRoute>
+                  <LibraryPage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/library/:id"
+              element={
+                <PrivateRoute>
+                  <RequestDetailPage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/library/show/:mediaType/:tmdbId"
+              element={
+                <PrivateRoute>
+                  <TvShowRequestPage />
                 </PrivateRoute>
               }
             />

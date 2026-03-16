@@ -1,14 +1,15 @@
 import fetch from 'node-fetch';
 import { get } from '../core/db.js';
 import { getTMDBCacheByTitle, saveTMDBCache } from './cache.js';
-import { normalizeTitleForTMDB } from './normalizer.js';
+// Use centralized normalization/parsing from media-inventory
+import { parseTorrentSafe, normalizeTitleForSearch } from '../media-inventory/utils.js';
 
 /**
  * Cherche des informations TMDB pour un titre donné
  * @param {string} title - Titre pour lequel chercher des informations
  * @returns {Promise<Object|null>} Données TMDB ou null si rien trouvé
  */
-export async function searchTMDB(title) {
+export async function searchTMDB(title, opts = {}) {
   try {
     // Vérifier d'abord dans le cache
     const cachedData = await getTMDBCacheByTitle(title);
@@ -16,9 +17,35 @@ export async function searchTMDB(title) {
       return cachedData;
     }
     
-    // Nettoyer le titre pour la recherche TMDB avec la fonction spécialisée
-    const normalizedTitle = normalizeTitleForTMDB(title);
-    // Les logs sont déjà gérés par la fonction normalizeTitleForTMDB
+    // Extraire un titre propre et une année avec parse-torrent-name, fallback à normalizeTitleForSearch
+    const ptn = await parseTorrentSafe(title);
+    const baseTitleRaw = (ptn.ok && ptn.title) ? ptn.title : title;
+    const baseTitle = normalizeTitleForSearch(baseTitleRaw);
+    const y = (ptn.ok && Number.isInteger(ptn.year) && ptn.year >= 1900 && ptn.year <= 2100) ? ptn.year : null;
+    const seToken = /\bS\d{1,2}E\d{1,3}\b/i.test(title) || /\b\d{1,2}x\d{1,3}\b/i.test(title);
+    const sToken = /\bS\d{1,2}\b/i.test(title);
+    const hasSeasonEpisode = !!(ptn.ok && (ptn.season || ptn.episode)) || seToken || sToken;
+    const categoryRaw = opts?.category ?? '';
+    const category = String(categoryRaw).toLowerCase();
+    const catTokens = category.split(/[\s,]+/).filter(Boolean);
+    const isTvByCategory = catTokens.some((tok) => {
+      if (['tv','serie','série','show','anime'].includes(tok)) return true;
+      if (/^5\d{3}$/.test(tok)) return true; // Torznab TV range 5000-5999
+      return false;
+    });
+    const kindHint = hasSeasonEpisode || isTvByCategory ? 'tv' : 'movie';
+    // For TV/Anime, remove season/episode tokens and common noise from the query
+    const cleanedForTv = baseTitle
+      // drop bracketed fansub/group tags
+      .replace(/[\[\(][^\]\)]+[\]\)]/g, ' ')
+      .replace(/\bS\d{1,2}E\d{1,3}\b/ig, ' ')
+      .replace(/\b\d{1,2}x\d{1,3}\b/ig, ' ')
+      .replace(/\bS\d{1,2}\b/ig, ' ')
+      .replace(/\bE\d{1,3}\b/ig, ' ')
+      .replace(/\b(MULTI|TRUEFRENCH|SUBFRENCH|VOSTFR|VF|VO|VFI|VFF|VQ)\b/ig, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    // debug logs removed for production
     
     // Récupérer l'access token depuis les paramètres (table app_settings)
     const settings = await get("SELECT value FROM app_settings WHERE name = 'tmdb_access_token'");
@@ -34,231 +61,92 @@ export async function searchTMDB(title) {
       return null;
     }
     
-    // Vérifier si le titre contient une année
-    const yearMatch = normalizedTitle.match(/\b(19|20)\d{2}\b/);
-    const hasYear = yearMatch !== null;
-    const year = hasYear ? yearMatch[0] : '';
-    
-    // Détecter si c'est une collection
-    const isCollection = /collection|coffret|integrale|intégrale|saga|trilogie|trilogy|quadrilogy|pentalogy|hexalogy|heptalogy|octology/i.test(normalizedTitle);
-    // console.log(`[TMDB] Détection de collection: ${isCollection ? 'Oui' : 'Non'} pour "${normalizedTitle}"`);
-    
-    // Première tentative avec le titre complet (avec année si présente)
-    // Si c'est une collection, chercher d'abord dans les collections
-    let searchUrl;
-    if (isCollection) {
-      // Extraire le nom de base de la collection (sans le mot "collection", "trilogy", etc.)
-      const baseTitle = normalizedTitle.replace(/\s*(collection|coffret|integrale|intégrale|saga|trilogie|trilogy|quadrilogy|pentalogy|hexalogy|heptalogy|octology)\s*/i, '').trim();
-      // console.log(`[TMDB] Recherche de collection avec le titre de base: "${baseTitle}"`);
-      searchUrl = `https://api.themoviedb.org/3/search/collection?query=${encodeURIComponent(baseTitle)}&include_adult=false&language=fr-FR&page=1`;
-    } else {
-      // Recherche standard multi
-      searchUrl = `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(normalizedTitle)}&include_adult=false&language=fr-FR&page=1`;
-    }
-    
-    let response = await fetch(searchUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${tmdbAccessToken}`,
-        'Content-Type': 'application/json'
-      }
-    });
+    // Séquence basée sur hint: TV -> tv(+first_air_date_year) -> multi -> movie(+year)
+    // ou Film -> movie(+year) -> multi -> tv(+first_air_date_year)
+    let data = { results: [] };
+    let forcedMediaType = null;
+    const queryTitle = (kindHint === 'tv') ? cleanedForTv : baseTitle;
+    const tvLangs = ['fr-FR','en-US','ja-JP'];
+    const steps = (kindHint === 'tv')
+      ? [
+          // try TV in multiple languages when anime; then multi; then movie
+          ...tvLangs.map((lng) => ({
+            url: () => `https://api.themoviedb.org/3/search/tv?query=${encodeURIComponent(queryTitle)}${y ? `&first_air_date_year=${encodeURIComponent(String(y))}` : ''}&include_adult=false&language=${lng}&page=1`,
+            media_type: 'tv'
+          })),
+          {
+            url: () => `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(queryTitle)}&include_adult=false&language=fr-FR&page=1`,
+            media_type: null
+          },
+          {
+            url: () => `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(queryTitle)}${y ? `&year=${encodeURIComponent(String(y))}` : ''}&include_adult=false&language=fr-FR&page=1`,
+            media_type: 'movie'
+          }
+        ]
+      : [
+          {
+            url: () => `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(queryTitle)}${y ? `&year=${encodeURIComponent(String(y))}` : ''}&include_adult=false&language=fr-FR&page=1`,
+            media_type: 'movie'
+          },
+          {
+            url: () => `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(queryTitle)}&include_adult=false&language=fr-FR&page=1`,
+            media_type: null
+          },
+          ...tvLangs.map((lng) => ({
+            url: () => `https://api.themoviedb.org/3/search/tv?query=${encodeURIComponent(queryTitle)}${y ? `&first_air_date_year=${encodeURIComponent(String(y))}` : ''}&include_adult=false&language=${lng}&page=1`,
+            media_type: 'tv'
+          }))
+        ];
 
-    if (!response.ok) {
-      console.error(`Erreur API TMDB: ${response.status} ${response.statusText}`);
-      return null;
-    }
-
-    let data = await response.json();
-    // console.log(`[TMDB] Réponse de la première recherche: ${data.results ? data.results.length : 0} résultats`);
-    
-    // Si c'est une collection et qu'on n'a pas trouvé de résultats, essayer la recherche multi standard
-    if (isCollection && (!data.results || data.results.length === 0)) {
-      // console.log(`[TMDB] Aucun résultat dans les collections, essai de recherche multi standard`);
-      searchUrl = `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(normalizedTitle)}&include_adult=false&language=fr-FR&page=1`;
-      
-      response = await fetch(searchUrl, {
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      const searchUrl = step.url();
+      const response = await fetch(searchUrl, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${tmdbAccessToken}`,
           'Content-Type': 'application/json'
         }
       });
-
       if (!response.ok) {
-        console.error(`Erreur API TMDB (recherche multi après collection): ${response.status} ${response.statusText}`);
-        return null;
+        continue;
       }
-
-      data = await response.json();
-      // console.log(`[TMDB] Réponse de la recherche multi après collection: ${data.results ? data.results.length : 0} résultats`);
-    }
-    
-    // Si aucun résultat n'est trouvé, essayer avec une version plus simple du titre
-    if (!data.results || data.results.length === 0) {
-      // Essayer sans l'année pour les titres qui ne sont pas des collections
-      if (hasYear && !isCollection) {
-        const titleWithoutYear = normalizedTitle.replace(/\s+\b(19|20)\d{2}\b/, '').trim();
-        // console.log(`[TMDB] Aucun résultat, essai sans l'année: "${titleWithoutYear}"`);
-        
-        searchUrl = `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(titleWithoutYear)}&include_adult=false&language=fr-FR&page=1`;
-        
-        response = await fetch(searchUrl, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${tmdbAccessToken}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        
-        if (response.ok) {
-          data = await response.json();
-          // console.log(`[TMDB] Résultats sans l'année: ${data.results ? data.results.length : 0}`);
-        }
-      }
-      
-      // Si toujours aucun résultat, essayer avec seulement les premiers mots du titre
-      if (!data.results || data.results.length === 0) {
-        // Prendre les 2-3 premiers mots significatifs du titre
-        const words = normalizedTitle.split(/\s+/);
-        let simplifiedTitle = '';
-        
-        // Prendre jusqu'à 3 mots, mais s'arrêter si on rencontre un mot-clé de collection
-        let wordCount = 0;
-        for (const word of words) {
-          if (/collection|coffret|integrale|intégrale|saga|trilogie|trilogy|quadrilogy|pentalogy|hexalogy|heptalogy|octology/i.test(word)) {
-            break;
-          }
-          
-          if (wordCount >= 3) break;
-          
-          // Ignorer les articles et prépositions courants
-          if (!/^(le|la|les|the|a|an|de|du|des|et|and|of)$/i.test(word)) {
-            simplifiedTitle += (simplifiedTitle ? ' ' : '') + word;
-            wordCount++;
-          }
-        }
-        
-        if (simplifiedTitle && simplifiedTitle !== normalizedTitle) {
-          // console.log(`[TMDB] Essai avec titre simplifié: "${simplifiedTitle}"`);
-          
-          searchUrl = `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(simplifiedTitle)}&include_adult=false&language=fr-FR&page=1`;
-          
-          response = await fetch(searchUrl, {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${tmdbAccessToken}`,
-              'Content-Type': 'application/json'
-            }
-          });
-          
-          if (response.ok) {
-            data = await response.json();
-            // console.log(`[TMDB] Résultats avec titre simplifié: ${data.results ? data.results.length : 0}`);
-          }
-        }
-      }
-      
-      // Pour les titres très courts (comme "Six jours"), essayer une recherche plus précise
-      if ((!data.results || data.results.length === 0) && normalizedTitle.split(/\s+/).length <= 3) {
-        // Extraire le titre de base sans année et sans mots-clés de collection
-        const baseTitle = normalizedTitle
-          .replace(/\b(19|20)\d{2}\b/, '')
-          .replace(/\s*(collection|coffret|integrale|intégrale|saga|trilogie|trilogy|quadrilogy|pentalogy|hexalogy|heptalogy|octology)\s*/i, '')
-          .trim();
-        
-        if (baseTitle && baseTitle.length >= 3) {
-          // console.log(`[TMDB] Essai avec titre court: "${baseTitle}"`);
-          
-          // Pour les titres courts, essayer d'abord une recherche de film
-          searchUrl = `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(baseTitle)}&include_adult=false&language=fr-FR&page=1`;
-          
-          response = await fetch(searchUrl, {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${tmdbAccessToken}`,
-              'Content-Type': 'application/json'
-            }
-          });
-          
-          if (response.ok) {
-            data = await response.json();
-            // console.log(`[TMDB] Résultats de recherche film pour titre court: ${data.results ? data.results.length : 0}`);
-            
-            // Si aucun résultat, essayer une recherche de série
-            if (!data.results || data.results.length === 0) {
-              searchUrl = `https://api.themoviedb.org/3/search/tv?query=${encodeURIComponent(baseTitle)}&include_adult=false&language=fr-FR&page=1`;
-              
-              response = await fetch(searchUrl, {
-                method: 'GET',
-                headers: {
-                  'Authorization': `Bearer ${tmdbAccessToken}`,
-                  'Content-Type': 'application/json'
-                }
-              });
-              
-              if (response.ok) {
-                data = await response.json();
-                // console.log(`[TMDB] Résultats de recherche série pour titre court: ${data.results ? data.results.length : 0}`);
-              }
-            }
-          }
-        }
+      const maybe = await response.json().catch(() => null);
+      const count = Array.isArray(maybe?.results) ? maybe.results.length : 0;
+      if (count > 0) {
+        data = maybe;
+        forcedMediaType = step.media_type;
+        break;
       }
     }
     
     if (data.results && data.results.length > 0) {
-      // console.log(`[TMDB] Premier résultat: ${JSON.stringify(data.results[0], null, 2)}`);
       
       // Traitement différent selon qu'il s'agit d'une collection ou d'un résultat multi
       let result;
       
-      if (isCollection && searchUrl.includes('/search/collection')) {
-        // Traitement spécifique pour les collections
-        // console.log(`[TMDB] Traitement d'une collection: ${data.results[0].name}`);
-        
-        // Construire les URLs complètes pour les images
-        const posterUrl = data.results[0].poster_path ? `https://image.tmdb.org/t/p/w500${data.results[0].poster_path}` : null;
-        const backdropUrl = data.results[0].backdrop_path ? `https://image.tmdb.org/t/p/w1280${data.results[0].backdrop_path}` : null;
-        
-        result = {
-          tmdb_id: data.results[0].id,
-          media_type: 'collection',  // Type spécifique pour les collections
-          title: data.results[0].name,
-          overview: data.results[0].overview,
-          poster_path: data.results[0].poster_path,
-          poster_url: posterUrl,  // URL complète de la pochette
-          backdrop_path: data.results[0].backdrop_path,
-          backdrop_url: backdropUrl,  // URL complète de l'arrière-plan
-          // Pas de release_date pour les collections
-          vote_average: null  // Pas de vote pour les collections
-        };
-      } else {
-        // Traitement standard pour les résultats multi (films, séries)
-        // console.log(`[TMDB] Traitement d'un ${data.results[0].media_type}: ${data.results[0].title || data.results[0].name}`);
-        
-        // Construire les URLs complètes pour les images
-        const posterUrl = data.results[0].poster_path ? `https://image.tmdb.org/t/p/w500${data.results[0].poster_path}` : null;
-        const backdropUrl = data.results[0].backdrop_path ? `https://image.tmdb.org/t/p/w1280${data.results[0].backdrop_path}` : null;
-        
-        result = {
-          tmdb_id: data.results[0].id,
-          media_type: data.results[0].media_type,
-          title: data.results[0].title || data.results[0].name,
-          overview: data.results[0].overview,
-          poster_path: data.results[0].poster_path,
-          poster_url: posterUrl,  // URL complète de la pochette
-          backdrop_path: data.results[0].backdrop_path,
-          backdrop_url: backdropUrl,  // URL complète de l'arrière-plan
-          release_date: data.results[0].release_date || data.results[0].first_air_date,
-          vote_average: data.results[0].vote_average
-        };
-      }
+      // Construire les URLs complètes pour les images
+      const posterUrl = data.results[0].poster_path ? `https://image.tmdb.org/t/p/w500${data.results[0].poster_path}` : null;
+      const backdropUrl = data.results[0].backdrop_path ? `https://image.tmdb.org/t/p/w1280${data.results[0].backdrop_path}` : null;
+
+      const r0 = data.results[0] || {};
+
+      result = {
+        tmdb_id: r0.id,
+        media_type: r0.media_type || forcedMediaType,
+        title: r0.title || r0.name,
+        overview: r0.overview,
+        poster_path: r0.poster_path,
+        poster_url: posterUrl,
+        backdrop_path: r0.backdrop_path,
+        backdrop_url: backdropUrl,
+        release_date: r0.release_date || r0.first_air_date,
+        vote_average: r0.vote_average
+      };
       
       // Sauvegarder dans le cache pour les futures requêtes
       await saveTMDBCache(title, result);
       
-      // [DEBUG ONLY] console.log(`[TMDB] Résultat final avec URLs: ${JSON.stringify(result, null, 2)}`);
       return result;
     }
     
@@ -291,7 +179,7 @@ function isTMDBRelevantCategory(category) {
   // 4000-4999: Jeux (ignoré)
   if (!isNaN(categoryNum)) {
     return (categoryNum >= 2000 && categoryNum < 3000) || // Films
-           (categoryNum >= 5000 && categoryNum < 6000 && categoryNum !== 5060 && categoryNum !== 5070);   // TV (sauf sport et anime VOSTFR)
+           (categoryNum >= 5000 && categoryNum < 6000 && categoryNum !== 5060);   // TV (inclut anime 5070)
   }
   
   // Catégories textuelles
@@ -311,13 +199,11 @@ function isTMDBRelevantCategory(category) {
  */
 export async function enrichItemsWithTMDB(items) {
   const enrichedItems = [];
-  let skippedCount = 0;
   
   for (const item of items) {
     try {
       // Vérifier si la catégorie est pertinente pour TMDB
       if (!isTMDBRelevantCategory(item.category)) {
-        skippedCount++;
         enrichedItems.push({
           ...item,
           tmdb: null
@@ -325,7 +211,8 @@ export async function enrichItemsWithTMDB(items) {
         continue;
       }
       
-      const tmdbData = await searchTMDB(item.title);
+      const catCombined = [item.category, item.categoryName].filter(Boolean).join(',');
+      const tmdbData = await searchTMDB(item.title, { category: catCombined });
       
       enrichedItems.push({
         ...item,
@@ -338,10 +225,6 @@ export async function enrichItemsWithTMDB(items) {
         tmdb: null
       });
     }
-  }
-  
-  if (skippedCount > 0) {
-    // [DEBUG ONLY] console.log(`[TMDB] ${skippedCount} éléments ignorés car catégorie non pertinente pour TMDB`);
   }
   
   return enrichedItems;

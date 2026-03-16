@@ -6,6 +6,11 @@ interface GlobalSettings {
   prowlarr_api_key: string;
   tmdb_access_token: string;
   min_seeds: number;
+  auto_search_interval_minutes: number;
+  media_movies_path: string;
+  media_series_path: string;
+  media_scan_interval_minutes: number;
+  media_requests_auto_delete_completed_after_hours: number;
 }
 
 class GlobalSettingsManager {
@@ -13,7 +18,12 @@ class GlobalSettingsManager {
     prowlarr_url: '',
     prowlarr_api_key: '',
     tmdb_access_token: '',
-    min_seeds: 3
+    min_seeds: 3,
+    auto_search_interval_minutes: 60,
+    media_movies_path: '/media/Films',
+    media_series_path: '/media/series',
+    media_scan_interval_minutes: 30,
+    media_requests_auto_delete_completed_after_hours: 24
   };
 
   async load() {
@@ -33,10 +43,8 @@ class GlobalSettingsManager {
         ...this.settings,
         ...settings
       };
-      "console.log('Paramètres chargés pour:', user?.username);"
       return this.settings;
     } catch (error) {
-      "console.error('Failed to load settings:', error);"
       throw error;
     }
   }
@@ -62,15 +70,19 @@ class GlobalSettingsManager {
         prowlarr_url: settings.prowlarr_url,
         prowlarr_api_key: settings.prowlarr_api_key,
         tmdb_access_token: settings.tmdb_access_token,
-        min_seeds: settings.min_seeds
+        min_seeds: settings.min_seeds,
+        auto_search_interval_minutes: settings.auto_search_interval_minutes,
+        media_movies_path: settings.media_movies_path,
+        media_series_path: settings.media_series_path,
+        media_scan_interval_minutes: settings.media_scan_interval_minutes,
+        media_requests_auto_delete_completed_after_hours: settings.media_requests_auto_delete_completed_after_hours
       });
       this.settings = {
         ...this.settings,
         ...settings
       };
-      "console.log('Paramètres mis à jour');"
     } catch (error) {
-      "console.error('Failed to update settings:', error);" 
+ 
       throw error;
     }
   }
@@ -82,3 +94,5 @@ class GlobalSettingsManager {
 }
 
 export const globalSettings = new GlobalSettingsManager();
+
+export default globalSettings;

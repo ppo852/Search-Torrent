@@ -11,10 +11,6 @@ export { default as apiService } from './api';
 export * from './tmdb';
 export { default as tmdbService } from './tmdb';
 
-// Import et re-export des services Prowlarr
-export * from './prowlarr';
-export { default as prowlarrService } from './prowlarr';
-
 // Import et re-export des services de paramètres
 export * from './settings';
 export { default as settingsService } from './settings';

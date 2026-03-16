@@ -1,38 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useGlobalDragAndDrop } from '../hooks/useGlobalDragAndDrop';
-import { useAuthStore } from '../stores/authStore';
-import { Trash2, ArrowDown, ArrowUp, Filter, ArrowUpDown, Check, X, Upload, Pause, Play } from 'lucide-react';
+import { Trash2, ArrowDown, X, Upload, Pause, Play } from 'lucide-react';
 import { StatsDisplay } from '../components/Stats/StatsDisplay';
 import { useQBittorrentStats } from '../hooks/useQBittorrentStats';
-import { Torrent, TorrentFilters as TorrentFiltersType, TorrentStatus, SortField } from '../types/qbittorrent';
-import { formatSize, formatSpeed, formatRatioWithColor, formatDate } from '../utils/formatters';
-import { getTorrentColor, getTrackerName, isTorrentError } from '../utils/torrentUtils';
-import { api } from '../lib/api';
+import { Torrent, SortField } from '../types/qbittorrent';
 import { 
   TorrentList, 
   TorrentListPagination, 
   TorrentFilters, 
   TorrentAddModal, 
-  TorrentDeleteModal,
-  TorrentContextMenu 
+  TorrentDeleteModal
 } from '../components/torrent';
 import { useTorrentFilters } from '../hooks/useTorrentFilters';
 import { useTorrentActions } from '../hooks/useTorrentActions';
 import { useTorrentUpload } from '../hooks/useTorrentUpload';
 
-interface TorrentFile {
-  id: string;
-  name: string;
-  size: number;
-  status: 'pending' | 'adding' | 'added' | 'error';
-  error?: string;
-}
-
 export const QBittorrentPage: React.FC = () => {
   // Drag & drop global via hook personnalisé
   const [invalidDrop, setInvalidDrop] = React.useState(false);
   const [droppedTorrentFiles, setDroppedTorrentFiles] = useState<File[]>([]);
-  const { isAuthenticated } = useAuthStore();
   const [torrents, setTorrents] = useState<Torrent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +38,7 @@ export const QBittorrentPage: React.FC = () => {
   });
   
   // Stats
-  const { stats, loading: statsLoading, error: statsError } = useQBittorrentStats();
+  const { stats } = useQBittorrentStats();
   
   // Refs
   const torrentsContainerRef = useRef<HTMLDivElement>(null);
@@ -97,7 +83,7 @@ export const QBittorrentPage: React.FC = () => {
         }
       } else if (data.torrents) {
         // Mise à jour partielle - ajouter/modifier les torrents existants
-        setTorrents(prevTorrents => {
+        setTorrents((prevTorrents: Torrent[]) => {
           const updatedTorrents = [...prevTorrents];
           
           // Mettre à jour ou ajouter les torrents modifiés
@@ -128,11 +114,6 @@ export const QBittorrentPage: React.FC = () => {
           return updatedTorrents;
         });
       }
-      
-      // Réinitialiser la page si nécessaire
-      if (currentPage > Math.ceil(torrents.length / itemsPerPage) && currentPage > 1) {
-        setCurrentPage(1);
-      }
     } catch (err) {
       // console.log('Erreur:', err);
       setError(err instanceof Error ? err.message : 'Une erreur est survenue');
@@ -160,7 +141,7 @@ export const QBittorrentPage: React.FC = () => {
       const data = await response.json();
       setCategories(Object.keys(data));
     } catch (err) {
-      console.log('Erreur:', err);
+      // ignore
     }
   };
 
@@ -182,7 +163,6 @@ export const QBittorrentPage: React.FC = () => {
     deleteWithFiles,
     setDeleteWithFiles,
     toggleTorrentSelection,
-    selectAllTorrents,
     deselectAllTorrents,
     handleSingleDelete,
     handleMultipleDelete,
@@ -194,19 +174,7 @@ export const QBittorrentPage: React.FC = () => {
   const {
     isModalOpen: isAddModalOpen,
     openModal: openAddModal,
-    closeModal: closeAddModal,
-    magnetLink,
-    onMagnetChange: handleMagnetChange,
-    handleFileChange,
-    handleFiles, // Ajouté pour drag & drop
-    selectedCategory,
-    onCategoryChange: setSelectedCategory,
-    tags,
-    onTagsChange,
-    isUploading,
-    uploadError,
-    addTorrent,
-    createCategory
+    closeModal: closeAddModal
   } = useTorrentUpload(() => {
     fetchTorrents();
     fetchCategories();
@@ -220,11 +188,15 @@ export const QBittorrentPage: React.FC = () => {
     openAddModal();
     setInvalidDrop(false);
   });
+
+  const getSortValue = (t: Torrent, field: SortField) => {
+    return (t as any)[field];
+  };
   
   // Tri des torrents
   const sortedTorrents = [...filteredTorrents].sort((a, b) => {
-    let valueA = a[sorting.field];
-    let valueB = b[sorting.field];
+    let valueA = getSortValue(a, sorting.field);
+    let valueB = getSortValue(b, sorting.field);
     
     // Gestion spéciale pour certains champs
     if (sorting.field === 'name') {
@@ -465,7 +437,7 @@ export const QBittorrentPage: React.FC = () => {
           initialFiles={droppedTorrentFiles}
           onCategoryCreated={(newCategory) => {
             // Mettre à jour la liste des catégories après la création d'une nouvelle catégorie
-            setCategories(prevCategories => [...prevCategories, newCategory]);
+            setCategories((prevCategories: string[]) => [...prevCategories, newCategory]);
           }}
         />
       )}

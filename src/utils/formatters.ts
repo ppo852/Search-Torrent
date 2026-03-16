@@ -50,3 +50,14 @@ export const formatDate = (timestamp: number): string => {
     minute: '2-digit'
   }).format(date);
 };
+
+/**
+ * Extrait l'année d'une date au format ISO (YYYY-MM-DD)
+ * @param date - Date au format ISO
+ * @returns Année extraite ou chaîne vide si date invalide
+ */
+export const formatYear = (date: string): string => {
+  if (!date) return '';
+  const [year] = date.split('-');
+  return year;
+};

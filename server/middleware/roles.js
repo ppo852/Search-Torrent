@@ -14,7 +14,7 @@ export function adminOnly(req, res, next) {
   
   // Vérifier si l'utilisateur est administrateur
   if (!req.user.is_admin) {
-    return res.status(403).json({ error: 'Accès refusé: droits administrateur requis' });
+    return res.status(403).json({ error: 'Action non autorisée: droits administrateur requis' });
   }
   
   // Si l'utilisateur est admin, continuer
@@ -37,6 +37,6 @@ export function userOrAdmin(req, res, next) {
   if (req.user.is_admin || req.user.id === req.params.id) {
     next();
   } else {
-    return res.status(403).json({ error: 'Accès refusé: vous n\'avez pas les droits nécessaires' });
+    return res.status(403).json({ error: 'Action non autorisée: vous n\'avez pas les droits nécessaires' });
   }
 }
