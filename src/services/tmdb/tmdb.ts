@@ -9,6 +9,7 @@ interface TmdbResult {
   type: 'movie' | 'tv';
   overview: string;
   voteAverage: number;
+  genres?: Array<{ id: number; name: string }>;
 }
 
 class TmdbAPI {
@@ -23,49 +24,54 @@ class TmdbAPI {
   }
 
   private cleanTitle(title: string): string {
-    // Remplacer d'abord tous les points par des espaces
-    let cleanedTitle = title.replace(/\./g, ' ');
-    
-    // Ensuite, diviser sur les espaces
-    const parts = cleanedTitle.split(/\s+/);
-    
-    // Remove common keywords, resolutions, codecs, and release group indicators
-    const filteredParts = parts.filter(part => {
-      const uppercasePart = part.toUpperCase();
-      // Skip common resolution indicators
-      if (/^(4K|2160P|1080P|720P|480P|360P)$/i.test(part)) return false;
-      
-      // Skip common codecs
-      if (/^(HEVC|H264|H265|X264|X265)$/i.test(part)) return false;
-      
-      // Skip common release indicators
-      if (/^(BLURAY|BDRIP|BRRIP|WEBDL|WEB-DL|HDRip|HDTV|DVDRip)$/i.test(part)) return false;
-      
-      // Skip common release group names
-      if (/^(RARBG|YIFY|YTS|SPARKS|AMIABLE|GECKOS|FGT|ION10|INTEGRALE)$/i.test(part)) return false;
-      
-      return true;
-    });
-    
-    // Join the remaining parts
-    return filteredParts.join(' ').trim();
+    const yearMatch = title.match(/\b(19|20)\d{2}\b/);
+    const year = yearMatch ? yearMatch[0] : '';
+
+    let q = title
+      // Remove IMDB/TVDB/TMDB ID annotations like {imdb-tt...} or [tmdbid-...]
+      .replace(/\{imdb-[^\}]+\}/gi, '')
+      .replace(/\[tvdbid-[^\]]+\]/gi, '')
+      .replace(/\{tmdb-[^\}]+\}/gi, '')
+      .replace(/\[tmdbid-[^\]]+\]/gi, '')
+      // Remove year in parentheses and everything after: (1989)...
+      .replace(/\(\d{4}\).*$/, '')
+      // Remove year with separators and everything after: .1989-... or -1989. or _1989_
+      .replace(/[._-]\d{4}[._-].*$/, '')
+      // Remove standalone year at end with separator: .1989 or -1989 or _1989
+      .replace(/[._-]\d{4}$/, '')
+      // Remove common quality indicators and everything after
+      .replace(/[._-](480p|720p|1080p|2160p|4k).*$/i, '')
+      .replace(/[._-](bluray|brrip|webrip|web-dl|webdl|hdtv|dvdrip).*$/i, '')
+      // Remove codec info and everything after
+      .replace(/[._-](x264|x265|h264|h265|hevc|xvid|divx|avc).*$/i, '')
+      // Remove release group tags (usually at the end like -RARBG, -YTS, etc.)
+      .replace(/-[A-Z0-9]+$/, '')
+      // Replace separators with spaces
+      .replace(/[._+\-]+/g, ' ')
+      // Collapse multiple spaces
+      .replace(/\s+/g, ' ')
+      // Trim whitespace
+      .trim();
+
+    if (year && q && !q.includes(year)) {
+      q = `${q} ${year}`;
+    }
+
+    return q;
   }
 
   async searchMultipleTypes(query: string, mediaType: 'movie' | 'tv' | 'all' = 'all'): Promise<TmdbResult[]> {
     if (!globalSettings.getTmdbAccessToken()) {
-      "console.error('TMDB API not configured');"
       return [];
     }
     
     const cleanedTitle = this.cleanTitle(query);
     
-    // Log pour le debug
-    "console.log(`Cleaned title: \"${cleanedTitle}\" (from \"${query}\") - Type: ${mediaType}`);"
     
     try {
       return await this.searchWithTitle(cleanedTitle, query, mediaType);
     } catch (error) {
-      "console.error('TMDB search error:', error);" 
+ 
       return [];
     }
   }
@@ -109,12 +115,12 @@ class TmdbAPI {
             posterPath: item.poster_path ? `https://image.tmdb.org/t/p/w185${item.poster_path}` : null,
             type: type,
             overview: item.overview,
-            voteAverage: item.vote_average
+            voteAverage: item.vote_average,
+            genres: item.genre_ids ? item.genre_ids.map((id: number) => ({ id, name: '' })) : [] // Ajouté pour filtrage
           });
         });
       } catch (error) {
-        "console.error(`Error searching ${type}:`, error);"
-      }
+        }
     }
     
     // Trier par popularité (vote_average)
@@ -131,7 +137,7 @@ class TmdbAPI {
    * @param mediaType Type de média (film, série ou les deux)
    * @param isAnime Indique si la recherche concerne des animes
    */
-  async searchSuggestions(query: string, mediaType: 'movie' | 'tv' | 'all' = 'all', isAnime: boolean = false): Promise<TmdbResult[]> {
+  async searchSuggestions(query: string, mediaType: 'movie' | 'tv' | 'all' = 'all', _isAnime: boolean = false): Promise<TmdbResult[]> {
     // Simplement appeler searchMultipleTypes qui a la même fonctionnalité
     return this.searchMultipleTypes(query, mediaType);
   }

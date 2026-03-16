@@ -1,19 +1,18 @@
 import { useState } from 'react';
-import { CalendarDays, Download, HardDrive, Tag, Users } from 'lucide-react';
+import { CalendarDays, Download, Users, BookmarkPlus } from 'lucide-react';
 import { SearchResult } from '../../types';
-import { translateCategory } from '../../utils/category';
-import { useNavigate } from 'react-router-dom';
 import { formatSize, formatDate } from '../../lib/formatters';
 
 interface ResultCardProps {
   result: SearchResult;
   onDownload: (result: SearchResult) => void;
+  onTrack?: () => void | Promise<void>;
   isSearchResult?: boolean;
   poster?: string | null;
 }
 
-export function ResultCard({ result, onDownload, isSearchResult = false, poster }: ResultCardProps) {
-  const [tmdbError, setTmdbError] = useState<string | null>(null);
+export function ResultCard({ result, onDownload, onTrack, isSearchResult = false, poster }: ResultCardProps) {
+  const [tmdbError] = useState<string | null>(null);
 
   // Fonction pour traduire les catégories en français
   const translateCategory = (category?: string): string => {
@@ -29,23 +28,6 @@ export function ResultCard({ result, onDownload, isSearchResult = false, poster 
     if (/anime/i.test(category)) return 'Anime';
     
     return 'Autres'; // Catégorie non reconnue, utiliser 'Autres' par défaut
-  };
-
-  // Fonction conservée mais non utilisée actuellement
-  // Pourrait être utilisée pour ajouter un bouton d'info TMDB dans le futur
-  const _handleTmdbSearch = async () => {
-    setTmdbError(null);
-
-    try {
-      const tmdbResult = await tmdbAPI.searchTitle(result.name);
-      if (tmdbResult) {
-        window.open(tmdbAPI.getTmdbUrl(tmdbResult.id, tmdbResult.type), '_blank');
-      } else {
-        setTmdbError("Aucun résultat trouvé sur TMDB");
-      }
-    } catch (error) {
-      setTmdbError(error instanceof Error ? error.message : "Erreur lors de la recherche TMDB");
-    }
   };
 
   return (
@@ -94,6 +76,21 @@ export function ResultCard({ result, onDownload, isSearchResult = false, poster 
               
               {/* Catégorie avec icône */}
               <span className="text-purple-400">📁 {translateCategory(result.category)}</span>
+              
+              {/* Indexer avec icône */}
+              {result.engine_url && (
+                <span className="text-blue-400">
+                  🔗 {
+                    (() => {
+                      try {
+                        return new URL(result.engine_url).hostname;
+                      } catch {
+                        return result.engine_url;
+                      }
+                    })()
+                  }
+                </span>
+              )}
             </div>
             {tmdbError && (
               <div className="mt-1 text-sm text-red-400">
@@ -102,7 +99,17 @@ export function ResultCard({ result, onDownload, isSearchResult = false, poster 
             )}
           </div>
         </div>
-        <div className="flex justify-end md:justify-start mt-2 md:mt-0">
+        <div className="flex justify-end md:justify-start mt-2 md:mt-0 gap-2">
+          {onTrack && (
+            <button
+              onClick={() => onTrack()}
+              className="flex items-center gap-1 px-3 py-2 md:px-2 md:py-1 bg-gray-700 hover:bg-gray-600 rounded transition-colors shrink-0"
+              title="Ajouter au suivi"
+            >
+              <BookmarkPlus className="h-4 w-4" />
+              <span className="text-sm">Suivre</span>
+            </button>
+          )}
           <button
             onClick={() => onDownload(result)}
             className="flex items-center gap-1 px-3 py-2 md:px-2 md:py-1 bg-blue-500 hover:bg-blue-600 rounded transition-colors shrink-0"

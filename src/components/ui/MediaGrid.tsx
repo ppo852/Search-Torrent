@@ -1,12 +1,23 @@
 import { useNavigate } from 'react-router-dom';
-import type { TmdbResult } from '../types';
+import type { TmdbResult } from '../../types';
 
 interface MediaGridProps {
   items: TmdbResult[];
+  category?: string;
   onSelect?: (item: TmdbResult) => void;
 }
 
-export function MediaGrid({ items, onSelect }: MediaGridProps) {
+export function MediaGrid({ items, category, onSelect }: MediaGridProps) {
+  // Filtrage par catégorie pour masquer les animes dans les séries
+  const filteredItems = items.filter(item => {
+    if (category === 'tv') {
+      return !item.genres?.some(g => g.id === 16);
+    }
+    if (category === 'anime') {
+      return item.genres?.some(g => g.id === 16);
+    }
+    return true;
+  });
   const navigate = useNavigate();
 
   const handleClick = (item: TmdbResult) => {
@@ -25,7 +36,7 @@ export function MediaGrid({ items, onSelect }: MediaGridProps) {
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-2 p-2">
-      {items.map((item) => (
+      {filteredItems.map((item) => (
         <div
           key={`${item.type}-${item.id}`}
           className="relative group cursor-pointer transition-transform duration-200 hover:scale-105"
@@ -64,6 +75,11 @@ export function MediaGrid({ items, onSelect }: MediaGridProps) {
                 </>
               )}
             </div>
+            {item.overview && (
+              <div className="mt-1 text-[10px] sm:text-xs text-gray-200 line-clamp-4 whitespace-pre-line">
+                {item.overview}
+              </div>
+            )}
           </div>
         </div>
       ))}

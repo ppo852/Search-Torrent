@@ -17,7 +17,8 @@ export function SortControls({
     { value: 'name' as SortOption, label: 'Nom' },
     { value: 'size' as SortOption, label: 'Taille' },
     { value: 'seeds' as SortOption, label: 'Sources' },
-    { value: 'leech' as SortOption, label: 'Pairs' }
+    { value: 'leech' as SortOption, label: 'Pairs' },
+    { value: 'date' as SortOption, label: 'Date' }
   ];
 
   return (

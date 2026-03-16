@@ -212,6 +212,42 @@ L'application est optimisée pour les performances :
 - [Zustand](https://zustand-demo.pmnd.rs/) pour la gestion d'état
 - [React Query](https://tanstack.com/query/latest) pour la gestion du cache
 
+## 📝 Notes de version v1.3.0
+
+### 🎨 Nouvelle Interface
+- ✨ **Nouvelle page d'accueil style Riven** avec hero section immersive
+- 🎬 Affichage des **films et séries tendance** en scroll horizontal
+- 🔄 **Boutons de navigation** (flèches gauche/droite) pour défiler facilement les sections
+- 📊 **80 médias affichés** au lieu de 40 pour plus de contenu
+- 🎯 Design moderne avec effets glassmorphism et animations fluides
+
+### 🔧 Refactoring & Optimisations
+- ♻️ **Composants réutilisables** : MediaCard et MediaSection
+- 🧹 **Code dupliqué éliminé** : -200 lignes (-58% de réduction)
+- 📦 **Fonction formatYear centralisée** dans utils/formatters.ts
+- 🗑️ **Suppression de la page Sorties** (doublon avec la nouvelle page d'accueil)
+- 🎯 Architecture plus maintenable et évolutive
+
+### 🚀 Backend
+- 🆕 **Nouvel endpoint `/api/tmdb/newest`** : combine films now_playing et séries trending
+- ⚡ **Cache TMDB optimisé** : 1 heure avec invalidation intelligente
+- 🔒 **Sécurité JWT maintenue** et renforcée
+- 📈 **Performance améliorée** : filtrage et entrelacement des résultats
+
+### 📱 Navigation Simplifiée
+- 🏠 **Accueil** : Nouveautés TMDB style Riven (films + séries tendance)
+- 🔍 **Recherche** : Flux RSS et torrents (ancienne page d'accueil renommée)
+- 📚 **Demandes** : Bibliothèque de demandes médias
+- ⚙️ **qBittorrent** : Gestion des torrents
+- 👤 **Admin** : Panneau d'administration
+
+### 🐛 Corrections
+- ✅ Analyse complète du code : 0 duplication, 0 code fantôme
+- ✅ Validation croisée par 2 IA pour garantir la qualité
+- ✅ Production ready avec Docker multi-stage optimisé
+
+---
+
 ## 📝 Notes de version v1.2
 
 ### Nouveautés

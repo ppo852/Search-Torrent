@@ -28,7 +28,6 @@ class DatabaseManager {
     try {
       return await api.getUsers();
     } catch (error) {
-      "console.error('Failed to get users:', error);"
       throw error;
     }
   }
@@ -37,7 +36,6 @@ class DatabaseManager {
     try {
       await api.createUser(username, password, isAdmin);
     } catch (error) {
-      "console.error('Failed to create user:', error);"
       throw error;
     }
   }
@@ -46,7 +44,6 @@ class DatabaseManager {
     try {
       await api.updateUser(userId, updates);
     } catch (error) {
-      "console.error('Failed to update user:', error);"
       throw error;
     }
   }
@@ -55,7 +52,6 @@ class DatabaseManager {
     try {
       await api.deleteUser(userId);
     } catch (error) {
-      "console.error('Failed to delete user:', error);"
       throw error;
     }
   }
@@ -92,7 +88,6 @@ class DatabaseManager {
         }
       };
     } catch (error) {
-      "console.error('Error verifying user:', error);"
       // Propager l'erreur au lieu de retourner null
       throw error;
     }
@@ -113,7 +108,6 @@ class DatabaseManager {
 
       return await response.json();
     } catch (error) {
-      "console.error('Failed to get RSS feeds:', error);"
       throw error;
     }
   }
@@ -136,7 +130,6 @@ class DatabaseManager {
         throw new Error('Failed to add RSS feed');
       }
     } catch (error) {
-      "console.error('Failed to add RSS feed:', error);"
       throw error;
     }
   }
@@ -154,7 +147,6 @@ class DatabaseManager {
         throw new Error('Failed to delete RSS feed');
       }
     } catch (error) {
-      "console.error('Failed to delete RSS feed:', error);"
       throw error;
     }
   }

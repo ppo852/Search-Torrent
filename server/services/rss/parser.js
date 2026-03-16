@@ -1,6 +1,5 @@
 import { parseString } from 'xml2js';
 import fetch from 'node-fetch';
-import { normalizeTitleForSearch } from './normalizer.js';
 import { detectCategory } from './category.js';
 
 // Classes d'erreur pour la gestion des flux RSS
@@ -203,7 +202,6 @@ export async function parseRSSFeed(url) {
 
 export default {
   parseRSSFeed,
-  normalizeTitleForSearch,
   detectCategory,
   RSSError,
   RSSFetchError,

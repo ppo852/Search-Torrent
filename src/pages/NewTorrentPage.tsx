@@ -7,17 +7,16 @@ import { SortControls } from '../components/ui/SortControls';
 import { RssFeedList } from '../components/rss/RssFeedList';
 import { MediaGrid } from '../components/ui/MediaGrid';
 import { Toast } from '../components/core/Toast';
-import type { SearchResult, SortOption, CategoryType, TmdbResult } from '../types';
-import { prowlarrAPI } from '../lib/prowlarr';
+import type { SearchResult, SortOption, CategoryType } from '../types';
 import { tmdbAPI } from '../lib/tmdb';
 import { globalSettings } from '../lib/settings';
 import { api } from '../lib/api';
 
-export function SearchPage() {
+export function NewTorrentPage() {
   const [sortOption, setSortOption] = useState<SortOption>('size');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [settings, setSettings] = useState<any>(null);
-  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   // Utiliser les résultats TMDB depuis le store global
   const itemsPerPage = 25;
@@ -45,17 +44,25 @@ export function SearchPage() {
     setLastSearchQuery(query);
 
     try {
-      // TMDB uniquement pour films et séries
-      if (category === 'movies' || category === 'tv') {
-        const tmdbType = category === 'movies' ? 'movie' : 'tv';
-        const suggestions = await tmdbAPI.searchSuggestions(query, tmdbType);
+      // Films: suggestions TMDB (la recherche de torrents se fait après clic sur une pochette)
+      if (category === 'movies') {
+        const suggestions = await tmdbAPI.searchSuggestions(query, 'movie');
         setTmdbResults(suggestions);
-        setResults([]); // On vide les résultats Prowlarr
-      } else {
-        // Pour toutes les autres catégories (anime inclus), recherche Prowlarr directe
-        const searchResults = await prowlarrAPI.search(query, category);
-        setResults(searchResults);
+        setResults([]);
+        return;
       }
+
+      // Séries/anime: suggestions TMDB (pas de suivi pour le moment)
+      if (category === 'tv' || category === 'anime') {
+        const suggestions = await tmdbAPI.searchSuggestions(query, 'tv');
+        setTmdbResults(suggestions);
+        setResults([]);
+        return;
+      }
+
+      // Autres catégories: recherche Prowlarr via backend
+      const response = await api.searchGeneral(query, category);
+      setResults(response?.results || []);
     } catch (err) {
       if (err instanceof Error) {
         setError(err.message);
@@ -71,10 +78,43 @@ export function SearchPage() {
     try {
       // Utiliser addTorrentWithCategory qui prend en compte la catégorie du résultat
       await api.addTorrentWithCategory(result.link, result.category);
-      setShowToast(true);
+      setToastMessage('Torrent ajouté avec succès !');
     } catch (error) {
       // [DEBUG ONLY] console.error('Error adding torrent:', error);
       setError('Erreur lors de l\'ajout du torrent à qBittorrent');
+    }
+  };
+
+  const handleTrackFromResult = async (result: SearchResult) => {
+    try {
+      const tmdbResults = await tmdbAPI.searchSuggestions(result.name, 'movie');
+      if (!tmdbResults || tmdbResults.length === 0) {
+        throw new Error('Impossible de trouver le film sur TMDB à partir de ce résultat');
+      }
+
+      const best = tmdbResults[0];
+      await api.addLibraryItem({
+        tmdb_id: best.id,
+        media_type: 'movie',
+        title: best.title,
+        poster_url: best.posterPath || null,
+        release_date: best.releaseDate || null
+      });
+
+      setToastMessage('Ajouté au suivi');
+    } catch (err) {
+      const anyErr = err as any;
+      if (anyErr?.status === 409) {
+        const msgs = Array.isArray(anyErr?.data?.messages) ? anyErr.data.messages : null;
+        if (msgs && msgs.length > 0) {
+          setToastMessage(msgs.join(' • '));
+          return;
+        }
+        const requestedBy = anyErr?.data?.existing?.requested_by;
+        setToastMessage(requestedBy ? `Déjà demandé par ${requestedBy}` : (anyErr?.data?.error || 'Déjà demandé'));
+        return;
+      }
+      setToastMessage(err instanceof Error ? err.message : 'Erreur lors de l\'ajout au suivi');
     }
   };
 
@@ -103,6 +143,11 @@ export function SearchPage() {
         case 'leech':
           comparison = a.leech - b.leech;
           break;
+        case 'date':
+          const dateA = a.publishDate ? new Date(a.publishDate).getTime() : 0;
+          const dateB = b.publishDate ? new Date(b.publishDate).getTime() : 0;
+          comparison = dateA - dateB;
+          break;
       }
       return sortDirection === 'asc' ? comparison : -comparison;
     });
@@ -120,6 +165,9 @@ export function SearchPage() {
     return sortedResults.slice(startIndex, startIndex + itemsPerPage);
   };
 
+  const hasTmdbResults = tmdbResults.length > 0;
+  const isMovies = lastSearchCategory === 'movies';
+
   return (
     <div className="container mx-auto px-4 py-6">
       <SearchBar onSearch={handleSearch} />
@@ -132,13 +180,32 @@ export function SearchPage() {
         <div className="text-center py-8 text-red-500">
           {error}
         </div>
-      ) : tmdbResults.length > 0 ? (
+      ) : isMovies ? (
+        hasTmdbResults ? (
+          <div>
+            <h2 className="text-xl font-semibold text-white mb-4">
+              Résultats trouvés
+            </h2>
+            <MediaGrid items={tmdbResults} category={lastSearchCategory} />
+          </div>
+        ) : (
+          <div className="text-center py-8 text-gray-400">
+            Aucun résultat trouvé.<br />
+            Vérifiez l'orthographe, la catégorie, ou réessayez avec un autre titre.
+          </div>
+        )
+      ) : ((lastSearchCategory === 'tv' || lastSearchCategory === 'anime') && tmdbResults.length === 0) ? (
+        <div className="text-center py-8 text-gray-400">
+          Aucun résultat trouvé.<br />
+          Vérifiez l'orthographe, la catégorie, ou réessayez avec un autre titre.
+        </div>
+      ) : hasTmdbResults ? (
         // Affichage des résultats TMDB
         <div>
           <h2 className="text-xl font-semibold text-white mb-4">
             Résultats trouvés
           </h2>
-          <MediaGrid items={tmdbResults} />
+          <MediaGrid items={tmdbResults} category={lastSearchCategory} />
         </div>
       ) : results.length > 0 ? (
         // Affichage des résultats Prowlarr
@@ -159,6 +226,7 @@ export function SearchPage() {
                 key={result.link}
                 result={result}
                 onDownload={handleDownload}
+                onTrack={undefined}
               />
             ))}
           </div>
@@ -204,14 +272,15 @@ export function SearchPage() {
         <RssFeedList />
       ) : (
         <div className="text-center py-8 text-gray-400">
-          Aucun résultat trouvé
+          Aucun résultat trouvé.<br />
+          Vérifiez l'orthographe, la catégorie, ou réessayez avec un autre titre.
         </div>
       )}
 
-      {showToast && (
+      {toastMessage && (
         <Toast
-          message="Torrent ajouté avec succès !"
-          onClose={() => setShowToast(false)}
+          message={toastMessage}
+          onClose={() => setToastMessage(null)}
         />
       )}
     </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Torrent, TorrentStatus } from '../types/qbittorrent';
 import { isTorrentError } from '../utils/torrentUtils';
 

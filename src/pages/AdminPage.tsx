@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { UserPlus, Settings, Users, Rss } from 'lucide-react';
+import { Trash2, Settings, Users, Rss, SlidersHorizontal } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
+import { api } from '../lib/api';
 
 // Imports des composants depuis la nouvelle structure
 import { UserSettingsModal } from '../components/settings/UserSettingsModal';
@@ -20,6 +21,23 @@ interface User {
   qbit_password?: string;
 }
 
+type QualitySortBy = 'seeds_desc' | 'size_asc' | 'size_desc' | 'date_desc' | 'date_asc';
+
+export interface QualityProfile {
+  id: string;
+  name: string;
+  min_size_mb: number;
+  max_size_mb: number;
+  required_keywords: string[];
+  blocked_keywords: string[];
+  sort_by: QualitySortBy;
+}
+
+export interface QualityProfileAssignments {
+  movie_profile_id: string;
+  tv_profile_id: string;
+}
+
 export function AdminPage() {
   const currentUser = useAuthStore((state) => state.user);
   const [activeTab, setActiveTab] = useState('users');
@@ -31,10 +49,29 @@ export function AdminPage() {
     prowlarr_url: '',
     prowlarr_api_key: '',
     tmdb_access_token: '',
-    min_seeds: 3
+    min_seeds: 3,
+    auto_search_interval_minutes: 60,
+    media_movies_path: '/media/Films',
+    media_series_path: '/media/series',
+    media_scan_interval_minutes: 30,
+    media_requests_auto_delete_completed_after_hours: 24
   });
+  const [autoSearchIntervalInput, setAutoSearchIntervalInput] = useState<string>('60');
+  const [mediaScanIntervalInput, setMediaScanIntervalInput] = useState<string>('30');
+  const [autoDeleteCompletedHoursInput, setAutoDeleteCompletedHoursInput] = useState<string>('24');
+
+  const [qualityProfiles, setQualityProfiles] = useState<QualityProfile[]>([]);
+  const [qualityAssignments, setQualityAssignments] = useState<QualityProfileAssignments>({
+    movie_profile_id: '',
+    tv_profile_id: ''
+  });
+  const [selectedProfileId, setSelectedProfileId] = useState<string>('');
+  const [newProfileName, setNewProfileName] = useState<string>('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  const [mediaInventoryScanStatus, setMediaInventoryScanStatus] = useState<any>(null);
+  const [isPollingMediaInventoryScan, setIsPollingMediaInventoryScan] = useState(false);
 
   useEffect(() => {
     if (currentUser && !currentUser.is_admin) {
@@ -46,6 +83,38 @@ export function AdminPage() {
     loadInitialData();
   }, []);
 
+  useEffect(() => {
+    if (activeTab !== 'settings') return;
+
+    let interval: number | undefined;
+    let cancelled = false;
+
+    const refresh = async () => {
+      try {
+        const data = await api.getMediaInventoryScanStatus();
+        if (cancelled) return;
+        setMediaInventoryScanStatus(data?.status ?? null);
+
+        const running = Boolean(data?.status?.running);
+        setIsPollingMediaInventoryScan(running);
+        if (!running && interval != null) {
+          window.clearInterval(interval);
+          interval = undefined;
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    refresh();
+    interval = window.setInterval(refresh, 2000);
+
+    return () => {
+      cancelled = true;
+      if (interval != null) window.clearInterval(interval);
+    };
+  }, [activeTab]);
+
   const loadInitialData = async () => {
     try {
       setIsLoading(true);
@@ -54,12 +123,76 @@ export function AdminPage() {
 
       const settings = await globalSettings.load();
       if (settings) {
+        const loadedInterval = (settings as any).auto_search_interval_minutes;
+        const intervalValue = typeof loadedInterval === 'number' && Number.isFinite(loadedInterval) ? loadedInterval : 60;
+        const loadedMediaInterval = (settings as any).media_scan_interval_minutes;
+        const mediaIntervalValue = typeof loadedMediaInterval === 'number' && Number.isFinite(loadedMediaInterval) ? loadedMediaInterval : 30;
+
+        const loadedAutoDeleteHours = (settings as any).media_requests_auto_delete_completed_after_hours;
+        const autoDeleteHoursValue = typeof loadedAutoDeleteHours === 'number' && Number.isFinite(loadedAutoDeleteHours) ? loadedAutoDeleteHours : 24;
+
+        const mediaMoviesPath = typeof (settings as any).media_movies_path === 'string' ? (settings as any).media_movies_path : '/media/Films';
+        const mediaSeriesPath = typeof (settings as any).media_series_path === 'string' ? (settings as any).media_series_path : '/media/series';
+
+        const loadedMinSeeds = (settings as any).min_seeds;
+        const minSeedsValue = typeof loadedMinSeeds === 'number' && Number.isFinite(loadedMinSeeds) ? loadedMinSeeds : 3;
         setGlobalConfig({
           prowlarr_url: settings.prowlarr_url || '',
           prowlarr_api_key: settings.prowlarr_api_key || '',
           tmdb_access_token: settings.tmdb_access_token || '',
-          min_seeds: settings.min_seeds || 3
+          min_seeds: minSeedsValue,
+          auto_search_interval_minutes: intervalValue,
+          media_movies_path: mediaMoviesPath,
+          media_series_path: mediaSeriesPath,
+          media_scan_interval_minutes: mediaIntervalValue,
+          media_requests_auto_delete_completed_after_hours: autoDeleteHoursValue
         });
+
+        setAutoSearchIntervalInput(String(intervalValue));
+        setMediaScanIntervalInput(String(mediaIntervalValue));
+        setAutoDeleteCompletedHoursInput(String(autoDeleteHoursValue));
+
+        const profilesRaw = Array.isArray((settings as any).quality_profiles) ? (settings as any).quality_profiles : [];
+        const assignments = (settings as any).quality_profile_assignments || null;
+
+        if (Array.isArray(profilesRaw)) {
+          const normalizedProfiles: QualityProfile[] = profilesRaw.map((p: any) => {
+            const minMb = typeof p?.min_size_mb === 'number'
+              ? p.min_size_mb
+              : typeof p?.min_size_gb === 'number'
+                ? Math.round(p.min_size_gb * 1024)
+                : 0;
+
+            const maxMb = typeof p?.max_size_mb === 'number'
+              ? p.max_size_mb
+              : typeof p?.max_size_gb === 'number'
+                ? Math.round(p.max_size_gb * 1024)
+                : 0;
+
+            return {
+              id: String(p?.id || ''),
+              name: String(p?.name || ''),
+              min_size_mb: minMb,
+              max_size_mb: maxMb,
+              required_keywords: Array.isArray(p?.required_keywords) ? p.required_keywords : [],
+              blocked_keywords: Array.isArray(p?.blocked_keywords) ? p.blocked_keywords : [],
+              sort_by: (p?.sort_by as QualitySortBy) || 'seeds_desc'
+            };
+          }).filter(p => p.id);
+
+          setQualityProfiles(normalizedProfiles);
+
+          if (normalizedProfiles.length > 0 && !selectedProfileId) {
+            setSelectedProfileId(normalizedProfiles[0].id);
+          }
+        }
+
+        if (assignments && typeof assignments === 'object') {
+          setQualityAssignments({
+            movie_profile_id: assignments.movie_profile_id || '',
+            tv_profile_id: assignments.tv_profile_id || ''
+          });
+        }
       }
     } catch (err) {
       setError('Erreur lors du chargement des données');
@@ -107,10 +240,122 @@ export function AdminPage() {
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await globalSettings.save(globalConfig);
+      const parsedInterval = parseInt(autoSearchIntervalInput, 10);
+      const parsedMediaInterval = parseInt(mediaScanIntervalInput, 10);
+      const parsedAutoDeleteHours = parseInt(autoDeleteCompletedHoursInput, 10);
+      await globalSettings.save({
+        ...globalConfig,
+        auto_search_interval_minutes: Number.isFinite(parsedInterval) ? parsedInterval : 60,
+        media_scan_interval_minutes: Number.isFinite(parsedMediaInterval) ? parsedMediaInterval : 30,
+        media_requests_auto_delete_completed_after_hours: Number.isFinite(parsedAutoDeleteHours) && parsedAutoDeleteHours >= 0 ? parsedAutoDeleteHours : 24
+      });
       setSuccess('Configuration globale mise à jour avec succès');
     } catch (err) {
       setError('Erreur lors de la mise à jour de la configuration globale');
+    }
+  };
+
+  const handleScanMediaInventoryNow = async () => {
+    try {
+      setError('');
+      setSuccess('');
+
+      const started = await api.scanMediaInventoryNow();
+      if (started?.status) {
+        setMediaInventoryScanStatus(started.status);
+      }
+
+      setSuccess('Scan inventaire médias lancé');
+
+      setIsPollingMediaInventoryScan(true);
+      const poll = async () => {
+        try {
+          const data = await api.getMediaInventoryScanStatus();
+          setMediaInventoryScanStatus(data?.status ?? null);
+
+          const running = Boolean(data?.status?.running);
+          if (!running) {
+            setIsPollingMediaInventoryScan(false);
+            if (data?.status?.lastError) {
+              setError(String(data.status.lastError));
+              setSuccess('');
+            } else {
+              setSuccess('Scan inventaire médias terminé');
+            }
+            return;
+          }
+        } catch {
+          // ignore
+        }
+        window.setTimeout(poll, 2000);
+      };
+
+      window.setTimeout(poll, 1000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur lors du scan inventaire médias');
+    }
+  };
+
+  const selectedProfile = qualityProfiles.find(p => p.id === selectedProfileId) || null;
+  const isProfileAssigned = (profileId: string) => {
+    return qualityAssignments.movie_profile_id === profileId || qualityAssignments.tv_profile_id === profileId;
+  };
+
+  const updateSelectedProfile = (updates: Partial<QualityProfile>) => {
+    setQualityProfiles(prev => prev.map(p => (p.id === selectedProfileId ? { ...p, ...updates } : p)));
+  };
+
+  const handleCreateProfile = () => {
+    const name = newProfileName.trim();
+    if (!name) return;
+
+    const id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+    const profile: QualityProfile = {
+      id,
+      name,
+      min_size_mb: 0,
+      max_size_mb: 0,
+      required_keywords: [],
+      blocked_keywords: [],
+      sort_by: 'seeds_desc'
+    };
+
+    setQualityProfiles(prev => [profile, ...prev]);
+    setSelectedProfileId(id);
+    setNewProfileName('');
+  };
+
+  const handleDeleteProfile = (profileId: string) => {
+    if (isProfileAssigned(profileId)) {
+      setError('Suppression interdite: ce profil est assigné (Film ou Série/Anime).');
+      return;
+    }
+
+    if (!window.confirm('Supprimer ce profil ?')) {
+      return;
+    }
+
+    setQualityProfiles(prev => prev.filter(p => p.id !== profileId));
+    if (selectedProfileId === profileId) {
+      const remaining = qualityProfiles.filter(p => p.id !== profileId);
+      setSelectedProfileId(remaining[0]?.id || '');
+    }
+  };
+
+  const handleSaveQualityProfiles = async () => {
+    try {
+      setError('');
+      setSuccess('');
+
+      await api.updateSettings({
+        quality_profiles: qualityProfiles,
+        quality_profile_assignments: qualityAssignments
+      });
+
+      await globalSettings.load();
+      setSuccess('Profils qualité enregistrés avec succès');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur lors de l\'enregistrement des profils qualité');
     }
   };
 
@@ -142,6 +387,13 @@ export function AdminPage() {
         >
           <Settings size={20} />
           <span>Configuration</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('quality')}
+          className={`px-4 py-2 ${activeTab === 'quality' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:text-white hover:bg-gray-700'} rounded-md flex items-center space-x-2`}
+        >
+          <SlidersHorizontal size={20} />
+          <span>Profils Qualité</span>
         </button>
         <button
           onClick={() => setActiveTab('rss')}
@@ -199,7 +451,7 @@ export function AdminPage() {
                       onClick={() => handleDeleteUser(user.id)}
                       className="text-red-400 hover:text-red-300"
                     >
-                      <UserPlus size={20} />
+                      <Trash2 size={20} />
                     </button>
                   )}
                 </div>
@@ -321,6 +573,108 @@ export function AdminPage() {
                 min="0"
               />
             </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Intervalle recherche auto (minutes)
+              </label>
+              <input
+                type="number"
+                value={autoSearchIntervalInput}
+                onChange={(e) => setAutoSearchIntervalInput(e.target.value)}
+                className="w-full bg-gray-700 text-gray-200 rounded px-3 py-2"
+                min="1"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Chemin films (inventaire)
+              </label>
+              <input
+                type="text"
+                value={globalConfig.media_movies_path}
+                onChange={(e) =>
+                  setGlobalConfig({ ...globalConfig, media_movies_path: e.target.value })
+                }
+                className="w-full bg-gray-700 text-gray-200 rounded px-3 py-2"
+                placeholder="/media/Films"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Chemin séries (inventaire)
+              </label>
+              <input
+                type="text"
+                value={globalConfig.media_series_path}
+                onChange={(e) =>
+                  setGlobalConfig({ ...globalConfig, media_series_path: e.target.value })
+                }
+                className="w-full bg-gray-700 text-gray-200 rounded px-3 py-2"
+                placeholder="/media/series"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Intervalle scan inventaire (minutes)
+              </label>
+              <input
+                type="number"
+                value={mediaScanIntervalInput}
+                onChange={(e) => setMediaScanIntervalInput(e.target.value)}
+                className="w-full bg-gray-700 text-gray-200 rounded px-3 py-2"
+                min="1"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Suppression auto des demandes films terminées (heures)
+              </label>
+              <input
+                type="number"
+                value={autoDeleteCompletedHoursInput}
+                onChange={(e) => setAutoDeleteCompletedHoursInput(e.target.value)}
+                className="w-full bg-gray-700 text-gray-200 rounded px-3 py-2"
+                min="0"
+              />
+              <div className="text-xs text-gray-400 mt-1">
+                0 = suppression immédiate après détection dans la médiathèque.
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleScanMediaInventoryNow}
+              className="w-full bg-gray-700 hover:bg-gray-600 text-white py-2 rounded"
+            >
+              Scanner maintenant
+            </button>
+
+            {(isPollingMediaInventoryScan || mediaInventoryScanStatus) && (
+              <div className="text-xs text-gray-400">
+                Statut scan :{' '}
+                <span className={mediaInventoryScanStatus?.lastError ? 'text-red-400' : 'text-gray-200'}>
+                  {mediaInventoryScanStatus?.running
+                    ? 'En cours...'
+                    : mediaInventoryScanStatus?.lastError
+                      ? `Erreur: ${String(mediaInventoryScanStatus.lastError)}`
+                      : mediaInventoryScanStatus?.finishedAt
+                        ? 'Terminé'
+                        : 'Inconnu'}
+                </span>
+                {mediaInventoryScanStatus?.startedAt && (
+                  <div>Début : {new Date(mediaInventoryScanStatus.startedAt).toLocaleString()}</div>
+                )}
+                {mediaInventoryScanStatus?.finishedAt && (
+                  <div>Fin : {new Date(mediaInventoryScanStatus.finishedAt).toLocaleString()}</div>
+                )}
+              </div>
+            )}
+
             <button
               type="submit"
               className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded"
@@ -328,6 +682,259 @@ export function AdminPage() {
               Enregistrer
             </button>
           </form>
+        </div>
+      )}
+
+      {activeTab === 'quality' && (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-semibold text-gray-100">Profils Qualité</h2>
+          </div>
+
+          <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="lg:col-span-1">
+                <div className="flex gap-2 mb-3">
+                  <input
+                    type="text"
+                    value={newProfileName}
+                    onChange={(e) => setNewProfileName(e.target.value)}
+                    className="flex-1 bg-gray-700 text-gray-200 rounded px-3 py-2"
+                    placeholder="Nouveau profil (ex: Films 1080p)"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCreateProfile}
+                    className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-white"
+                  >
+                    Créer
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  {qualityProfiles.length === 0 ? (
+                    <div className="text-sm text-gray-400">Aucun profil.</div>
+                  ) : (
+                    qualityProfiles.map((p) => (
+                      <div
+                        key={p.id}
+                        className={`flex items-center justify-between gap-2 p-3 rounded border cursor-pointer ${
+                          selectedProfileId === p.id
+                            ? 'bg-gray-700 border-gray-600'
+                            : 'bg-gray-900/40 border-gray-700 hover:bg-gray-800'
+                        }`}
+                        onClick={() => setSelectedProfileId(p.id)}
+                      >
+                        <div className="min-w-0">
+                          <div className="text-sm text-white truncate">{p.name}</div>
+                          <div className="text-xs text-gray-400">
+                            {isProfileAssigned(p.id) ? 'Assigné' : 'Non assigné'}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteProfile(p.id);
+                          }}
+                          disabled={isProfileAssigned(p.id)}
+                          className="px-3 py-1.5 rounded bg-red-700/60 hover:bg-red-700 text-white text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Supprimer
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="lg:col-span-2">
+                {!selectedProfile ? (
+                  <div className="text-sm text-gray-400">Sélectionne un profil pour l'éditer.</div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Nom du profil</label>
+                        <input
+                          type="text"
+                          value={selectedProfile.name}
+                          onChange={(e) => updateSelectedProfile({ name: e.target.value })}
+                          className="w-full bg-gray-700 text-gray-200 rounded px-3 py-2"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Tri préféré</label>
+                        <select
+                          value={selectedProfile.sort_by}
+                          onChange={(e) => updateSelectedProfile({ sort_by: e.target.value as QualitySortBy })}
+                          className="w-full bg-gray-700 text-gray-200 rounded px-3 py-2"
+                        >
+                          <option value="seeds_desc">Seeds (desc)</option>
+                          <option value="size_desc">Taille (desc)</option>
+                          <option value="size_asc">Taille (asc)</option>
+                          <option value="date_desc">Date (desc)</option>
+                          <option value="date_asc">Date (asc)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Taille min (Mo)</label>
+                        <input
+                          type="number"
+                          value={selectedProfile.min_size_mb === 0 ? '' : selectedProfile.min_size_mb}
+                          onChange={(e) =>
+                            updateSelectedProfile({
+                              min_size_mb: e.target.value === '' ? 0 : parseFloat(e.target.value) || 0
+                            })
+                          }
+                          className="w-full bg-gray-700 text-gray-200 rounded px-3 py-2"
+                          min="0"
+                          step="1"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Taille max (Mo)</label>
+                        <input
+                          type="number"
+                          value={selectedProfile.max_size_mb === 0 ? '' : selectedProfile.max_size_mb}
+                          onChange={(e) =>
+                            updateSelectedProfile({
+                              max_size_mb: e.target.value === '' ? 0 : parseFloat(e.target.value) || 0
+                            })
+                          }
+                          className="w-full bg-gray-700 text-gray-200 rounded px-3 py-2"
+                          min="0"
+                          step="1"
+                        />
+                        <div className="text-xs text-gray-400 mt-1">0 = pas de limite</div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Mots obligatoires</label>
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {selectedProfile.required_keywords.map((keyword, index) => (
+                            <span key={index} className="inline-flex items-center gap-1 px-2 py-1 bg-blue-600 text-white text-sm rounded">
+                              {keyword}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const newKeywords = selectedProfile.required_keywords.filter((_, i) => i !== index);
+                                  updateSelectedProfile({ required_keywords: newKeywords });
+                                }}
+                                className="text-white hover:text-red-300"
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="Ajouter un mot-clé..."
+                            className="flex-1 bg-gray-700 text-gray-200 rounded px-3 py-2"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const value = e.currentTarget.value.trim();
+                                if (value && !selectedProfile.required_keywords.includes(value)) {
+                                  updateSelectedProfile({ 
+                                    required_keywords: [...selectedProfile.required_keywords, value] 
+                                  });
+                                  e.currentTarget.value = '';
+                                }
+                              }
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Mots interdits</label>
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {selectedProfile.blocked_keywords.map((keyword, index) => (
+                            <span key={index} className="inline-flex items-center gap-1 px-2 py-1 bg-red-600 text-white text-sm rounded">
+                              {keyword}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const newKeywords = selectedProfile.blocked_keywords.filter((_, i) => i !== index);
+                                  updateSelectedProfile({ blocked_keywords: newKeywords });
+                                }}
+                                className="text-white hover:text-red-300"
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="Ajouter un mot-clé..."
+                            className="flex-1 bg-gray-700 text-gray-200 rounded px-3 py-2"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const value = e.currentTarget.value.trim();
+                                if (value && !selectedProfile.blocked_keywords.includes(value)) {
+                                  updateSelectedProfile({ 
+                                    blocked_keywords: [...selectedProfile.blocked_keywords, value] 
+                                  });
+                                  e.currentTarget.value = '';
+                                }
+                              }
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Profil pour Films</label>
+                        <select
+                          value={qualityAssignments.movie_profile_id}
+                          onChange={(e) => setQualityAssignments(prev => ({ ...prev, movie_profile_id: e.target.value }))}
+                          className="w-full bg-gray-700 text-gray-200 rounded px-3 py-2"
+                        >
+                          {qualityProfiles.map(p => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Profil pour Séries/Anime</label>
+                        <select
+                          value={qualityAssignments.tv_profile_id}
+                          onChange={(e) => setQualityAssignments(prev => ({ ...prev, tv_profile_id: e.target.value }))}
+                          className="w-full bg-gray-700 text-gray-200 rounded px-3 py-2"
+                        >
+                          {qualityProfiles.map(p => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleSaveQualityProfiles}
+                      className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded"
+                    >
+                      Enregistrer les profils
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

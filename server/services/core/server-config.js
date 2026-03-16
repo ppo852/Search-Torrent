@@ -17,6 +17,10 @@ import authRoutes from '../../routes/auth/index.js';
 import settingsRoutes from '../../routes/settings/index.js';
 import usersRoutes from '../../routes/users/index.js';
 import qbittorrentRoutes from '../../routes/qbittorrent/index.js';
+import libraryRoutes from '../../routes/library/index.js';
+import mediaInventoryRoutes from '../../routes/media-inventory/index.js';
+import tmdbRoutes from '../../routes/tmdb/index.js';
+import prowlarrRoutes from '../../routes/prowlarr/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -54,6 +58,10 @@ export function configureServer() {
   app.use('/api/auth', authRoutes);
   app.use('/api/settings', settingsRoutes);
   app.use('/api/users', usersRoutes);
+  app.use('/api/library', libraryRoutes);
+  app.use('/api/media-inventory', mediaInventoryRoutes);
+  app.use('/api/tmdb', tmdbRoutes);
+  app.use('/api/prowlarr', prowlarrRoutes);
   
   // Route de compatibilité pour maintenir l'ancien endpoint de login
   app.post('/api/login', (req, res) => {
@@ -66,8 +74,27 @@ export function configureServer() {
   if (!isDevelopment) {
     const distPath = join(dirname(dirname(dirname(__dirname))), 'dist');
     if (existsSync(distPath)) {
-      app.use(express.static(distPath));
+      // Assets avec hash: cache long (1 an)
+      app.use('/assets', express.static(join(distPath, 'assets'), {
+        maxAge: '1y',
+        immutable: true
+      }));
+      
+      // Autres fichiers statiques: cache court
+      app.use(express.static(distPath, {
+        maxAge: '1h',
+        setHeaders: (res, path) => {
+          // index.html: pas de cache (toujours revalider)
+          if (path.endsWith('index.html')) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+          }
+        }
+      }));
+      
       app.get('*', (req, res) => {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.sendFile(join(distPath, 'index.html'));
       });
     }
