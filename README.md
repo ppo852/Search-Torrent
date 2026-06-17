@@ -26,37 +26,57 @@ Interface web moderne pour rechercher, suivre et télécharger vos médias via *
 - [qBittorrent](https://www.qbittorrent.org/) avec WebUI activée
 - Docker et Docker Compose
 
-### Déploiement rapide
+### Déploiement production (Docker Hub)
 
-1. Créez votre fichier `docker-compose.yml` :
-
-```yaml
-services:
-  search-torrent:
-    image: ppo852/search-torrent:1.6.3
-    container_name: search-torrent
-    ports:
-      - "4000:80"
-    volumes:
-      - ./data:/app/data
-    environment:
-      - NODE_ENV=production
-      - JWT_SECRET=changez_moi_avec_une_longue_chaine_aleatoire
-      - ADMIN_USERNAME=admin
-      - ADMIN_PASSWORD=changez_moi
-      - LOG_LEVEL=info
-    restart: unless-stopped
-```
-
-2. Lancez l'application :
+Le dépôt inclut un `docker-compose.yml` générique prêt à l'emploi :
 
 ```bash
+docker compose pull
 docker compose up -d
 ```
 
-3. Accédez à `http://localhost:4000` — identifiants = `ADMIN_USERNAME` / `ADMIN_PASSWORD`.
+Accédez à `http://localhost:4000` — identifiants = `ADMIN_USERNAME` / `ADMIN_PASSWORD` (voir variables ci-dessous).
 
-> La base SQLite est stockée dans `./data` (volume monté). Elle n'est **pas** incluse dans l'image Docker Hub.
+> La base SQLite est dans `./data` (volume monté). Elle n'est **pas** incluse dans l'image Docker Hub.
+
+### Développement local (build depuis les sources)
+
+Pour builder l'image localement avec votre propre config (ports, chemins, secrets) :
+
+```bash
+cp docker-compose.dev.yml.example docker-compose.dev.yml
+# Éditez docker-compose.dev.yml selon votre machine
+docker compose -f docker-compose.dev.yml up -d --build
+```
+
+> `docker-compose.dev.yml` est **gitignoré** : vos chemins personnels ne partent pas sur GitHub.
+
+## Configuration qBittorrent
+
+Pour que Search-Torrent envoie correctement les catégories (`Films`, `Séries`, `Anime`, etc.) et que les fichiers aillent dans le bon dossier :
+
+### 1. Interface Web
+
+**Paramètres → Interface Web**
+
+- Activer l'**interface Web distante**
+- Noter l'URL, l'utilisateur et le mot de passe
+- Les renseigner dans Search-Torrent (paramètres utilisateur)
+
+### 2. Gestion automatique des torrents
+
+**Paramètres → Téléchargements**
+
+- **Mode de gestion de torrent par défaut** → **Automatique**
+- **Lorsque la catégorie du torrent change** → **Déplacer le torrent**
+
+Ces deux réglages sont le minimum pour que Search-Torrent puisse assigner une catégorie (`Films`, `Séries`, `Anime`, etc.) et que qBittorrent range le torrent au bon endroit.
+
+### 3. Catégories — création automatique
+
+**Vous n'avez pas besoin de créer les catégories à la main.** Quand Search-Torrent envoie un torrent avec une catégorie, qBittorrent la **crée automatiquement** si elle n'existe pas encore (`Films`, `Séries`, `Anime`, `Musique`, `Logiciels`, `Jeux`, `Livres`, `Autres`…).
+
+> **Optionnel** — si vous voulez un dossier spécifique par catégorie dès le départ, vous pouvez définir le chemin de sauvegarde après coup : clic droit sur la catégorie dans qBittorrent → **Définir le chemin de sauvegarde**. Sinon, qBittorrent utilise le dossier de téléchargement par défaut + sous-dossier de la catégorie.
 
 ## Variables d'environnement
 
