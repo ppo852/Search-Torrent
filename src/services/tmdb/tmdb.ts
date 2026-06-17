@@ -66,21 +66,12 @@ class TmdbAPI {
     }
 
     const cleanedTitle = this.cleanTitle(query);
-<<<<<<< HEAD
 
 
     try {
       return await this.searchWithTitle(cleanedTitle, query, mediaType);
     } catch (error) {
 
-=======
-    
-    
-    try {
-      return await this.searchWithTitle(cleanedTitle, query, mediaType);
-    } catch (error) {
- 
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
       return [];
     }
   }
@@ -131,19 +122,11 @@ class TmdbAPI {
             type: actualType as 'movie' | 'tv',
             overview: item.overview,
             voteAverage: item.vote_average,
-<<<<<<< HEAD
             genres: item.genre_ids ? item.genre_ids.map((id: number) => ({ id, name: '' })) : []
           });
         });
       } catch (error) {
       }
-=======
-            genres: item.genre_ids ? item.genre_ids.map((id: number) => ({ id, name: '' })) : [] // Ajouté pour filtrage
-          });
-        });
-      } catch (error) {
-        }
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     }
 
     // Trier par popularité (vote_average)

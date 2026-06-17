@@ -23,7 +23,6 @@ export async function initializeDatabase() {
       download_path_movies TEXT,
       download_path_series TEXT
     )`);
-<<<<<<< HEAD
 
     // Migration : Ajouter les colonnes de chemin de téléchargement si elles n'existent pas
     const tableInfo = await query("PRAGMA table_info(users)");
@@ -45,8 +44,6 @@ export async function initializeDatabase() {
       await run("ALTER TABLE users ADD COLUMN allow_force_interactive_download INTEGER DEFAULT 0");
       logger.info("Migration: Ajout de allow_force_interactive_download à la table users");
     }
-=======
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
     // Création de la table settings si elle n'existe pas
     await run(`CREATE TABLE IF NOT EXISTS settings (
@@ -93,7 +90,6 @@ export async function initializeDatabase() {
       last_updated TEXT NOT NULL,
       expires_at TEXT NOT NULL
     )`);
-<<<<<<< HEAD
 
     // Cache persistant des détails show TMDB par tmdb_id (genres, statut, dates)
     await run(`CREATE TABLE IF NOT EXISTS tmdb_tv_show_cache (
@@ -111,8 +107,6 @@ export async function initializeDatabase() {
       last_updated TEXT NOT NULL,
       expires_at TEXT NOT NULL
     )`);
-=======
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
     // Création de la table app_settings si elle n'existe pas (table additionnelle)
     await run(`CREATE TABLE IF NOT EXISTS app_settings (
@@ -256,7 +250,6 @@ export async function initializeDatabase() {
     await run(`CREATE INDEX IF NOT EXISTS idx_tv_season_requests_user_id ON tv_season_requests(user_id)`);
     await run(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_tv_season_requests_tmdb_type_season ON tv_season_requests(tmdb_id, media_type, season_number)`);
 
-<<<<<<< HEAD
     // Dédoublonnage tv_episode_downloads: garder la ligne la plus récente par (demande, épisode)
     await run(
       `DELETE FROM tv_episode_downloads
@@ -268,8 +261,6 @@ export async function initializeDatabase() {
     );
     await run(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_tv_episode_downloads_request_episode ON tv_episode_downloads(tv_season_request_id, episode_number)`);
 
-=======
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     await run(`CREATE INDEX IF NOT EXISTS idx_tv_season_request_history_request_id ON tv_season_request_history(tv_season_request_id)`);
     await run(`CREATE INDEX IF NOT EXISTS idx_tv_season_request_history_created_at ON tv_season_request_history(created_at)`);
 
@@ -421,103 +412,6 @@ async function initializeDefaultAppSettings() {
     }
   } catch (error) {
     logger.error('Erreur lors de l\'initialisation des paramètres app_settings:', error);
-    throw error;
-  }
-}
-
-async function initializeDefaultAppSettings() {
-  try {
-    const now = new Date().toISOString();
-
-    const existingProfiles = await get('SELECT value FROM app_settings WHERE name = ?', ['quality_profiles']);
-    const existingAssignments = await get('SELECT value FROM app_settings WHERE name = ?', ['quality_profile_assignments']);
-    const existingAutoSearchInterval = await get('SELECT value FROM app_settings WHERE name = ?', ['auto_search_interval_minutes']);
-    const existingMediaMoviesPath = await get('SELECT value FROM app_settings WHERE name = ?', ['media_movies_path']);
-    const existingMediaSeriesPath = await get('SELECT value FROM app_settings WHERE name = ?', ['media_series_path']);
-    const existingMediaScanInterval = await get('SELECT value FROM app_settings WHERE name = ?', ['media_scan_interval_minutes']);
-    const existingAutoDeleteCompleted = await get('SELECT value FROM app_settings WHERE name = ?', ['media_requests_auto_delete_completed_after_hours']);
-
-    if (!existingProfiles || !existingAssignments) {
-      const movieProfileId = randomUUID();
-      const tvProfileId = randomUUID();
-
-      const defaultProfiles = [
-        {
-          id: movieProfileId,
-          name: 'Films - Standard',
-          min_size_mb: 0,
-          max_size_mb: 0,
-          required_keywords: [],
-          blocked_keywords: [],
-          sort_by: 'seeds_desc'
-        },
-        {
-          id: tvProfileId,
-          name: 'Séries/Anime - Standard',
-          min_size_mb: 0,
-          max_size_mb: 0,
-          required_keywords: [],
-          blocked_keywords: [],
-          sort_by: 'seeds_desc'
-        }
-      ];
-
-      const defaultAssignments = {
-        movie_profile_id: movieProfileId,
-        tv_profile_id: tvProfileId
-      };
-
-      if (!existingProfiles) {
-        await run(
-          'INSERT INTO app_settings (id, name, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-          [randomUUID(), 'quality_profiles', JSON.stringify(defaultProfiles), now, now]
-        );
-      }
-
-      if (!existingAssignments) {
-        await run(
-          'INSERT INTO app_settings (id, name, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-          [randomUUID(), 'quality_profile_assignments', JSON.stringify(defaultAssignments), now, now]
-        );
-      }
-    }
-
-    if (!existingAutoSearchInterval) {
-      await run(
-        'INSERT INTO app_settings (id, name, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-        [randomUUID(), 'auto_search_interval_minutes', JSON.stringify(60), now, now]
-      );
-    }
-
-    if (!existingMediaMoviesPath) {
-      await run(
-        'INSERT INTO app_settings (id, name, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-        [randomUUID(), 'media_movies_path', JSON.stringify('/media/Films'), now, now]
-      );
-    }
-
-    if (!existingMediaSeriesPath) {
-      await run(
-        'INSERT INTO app_settings (id, name, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-        [randomUUID(), 'media_series_path', JSON.stringify('/media/series'), now, now]
-      );
-    }
-
-    if (!existingMediaScanInterval) {
-      await run(
-        'INSERT INTO app_settings (id, name, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-        [randomUUID(), 'media_scan_interval_minutes', JSON.stringify(30), now, now]
-      );
-    }
-
-    if (!existingAutoDeleteCompleted) {
-      await run(
-        'INSERT INTO app_settings (id, name, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-        [randomUUID(), 'media_requests_auto_delete_completed_after_hours', JSON.stringify(24), now, now]
-      );
-    }
-  } catch (error) {
-    console.error('Erreur lors de l\'initialisation des paramètres app_settings:', error);
     throw error;
   }
 }

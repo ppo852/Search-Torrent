@@ -12,10 +12,7 @@ const ADMIN_ONLY_SETTINGS = [
   'auto_search_interval_minutes',
   'media_movies_path',
   'media_series_path',
-<<<<<<< HEAD
   'media_anime_path',
-=======
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   'media_scan_interval_minutes',
   'media_requests_auto_delete_completed_after_hours'
 ];
@@ -252,7 +249,6 @@ export async function updateGlobalSettingsHandler(req, res) {
       }
     }
 
-<<<<<<< HEAD
     if (Object.prototype.hasOwnProperty.call(settings, 'media_anime_path')) {
       const v = settings.media_anime_path;
       if (typeof v !== 'string') {
@@ -260,8 +256,6 @@ export async function updateGlobalSettingsHandler(req, res) {
       }
     }
 
-=======
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     for (const [key, value] of Object.entries(settings)) {
       if (value !== undefined) {
         await settingsService.saveSetting(key, value);
@@ -279,12 +273,8 @@ export async function updateGlobalSettingsHandler(req, res) {
     if (
       Object.prototype.hasOwnProperty.call(settings, 'media_scan_interval_minutes') ||
       Object.prototype.hasOwnProperty.call(settings, 'media_movies_path') ||
-<<<<<<< HEAD
       Object.prototype.hasOwnProperty.call(settings, 'media_series_path') ||
       Object.prototype.hasOwnProperty.call(settings, 'media_anime_path')
-=======
-      Object.prototype.hasOwnProperty.call(settings, 'media_series_path')
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     ) {
       try {
         schedulerService.scheduleMediaInventoryScan(0);
@@ -292,11 +282,7 @@ export async function updateGlobalSettingsHandler(req, res) {
         // ignore
       }
     }
-<<<<<<< HEAD
 
-=======
-    
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     res.json({ success: true, message: 'Paramètres mis à jour avec succès' });
   } catch (error) {
     console.error('Erreur lors de la mise à jour des paramètres globaux:', error);

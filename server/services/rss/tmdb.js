@@ -1,7 +1,6 @@
 import fetch from 'node-fetch';
 import logger from '../core/logger.js';
 import { get } from '../core/db.js';
-<<<<<<< HEAD
 import { getTMDBCacheByTitle, saveTMDBCache, getTMDBTvShowCache, saveTMDBTvShowCache } from './cache.js';
 import { applyTmdbCategoryOverride, TMDB_ANIMATION_GENRE_ID } from './category.js';
 // Use centralized normalization/parsing from media-inventory
@@ -72,11 +71,6 @@ function attachTvShowDetails(tmdbData, showDetails) {
     show_last_air_date: showDetails.last_air_date,
   };
 }
-=======
-import { getTMDBCacheByTitle, saveTMDBCache } from './cache.js';
-// Use centralized normalization/parsing from media-inventory
-import { parseTorrentSafe, normalizeTitleForSearch } from '../media-inventory/utils.js';
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
 /**
  * Cherche des informations TMDB pour un titre donné
@@ -94,11 +88,7 @@ export async function searchTMDB(title, opts = {}) {
     // Extraire un titre propre et une année avec parse-torrent-name, fallback à normalizeTitleForSearch
     const ptn = await parseTorrentSafe(title);
     const baseTitleRaw = (ptn.ok && ptn.title) ? ptn.title : title;
-<<<<<<< HEAD
     const baseTitle = cleanMediaTitle(baseTitleRaw);
-=======
-    const baseTitle = normalizeTitleForSearch(baseTitleRaw);
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     const y = (ptn.ok && Number.isInteger(ptn.year) && ptn.year >= 1900 && ptn.year <= 2100) ? ptn.year : null;
     const seToken = /\bS\d{1,2}E\d{1,3}\b/i.test(title) || /\b\d{1,2}x\d{1,3}\b/i.test(title);
     const sToken = /\bS\d{1,2}\b/i.test(title);
@@ -277,13 +267,9 @@ function isTMDBRelevantCategory(category) {
  */
 export async function enrichItemsWithTMDB(items) {
   const enrichedItems = [];
-<<<<<<< HEAD
   const tvShowCache = new Map();
   const tmdbAccessToken = await getTmdbAccessToken();
 
-=======
-  
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   for (const item of items) {
     try {
       // Vérifier si la catégorie est pertinente pour TMDB
@@ -294,19 +280,11 @@ export async function enrichItemsWithTMDB(items) {
         });
         continue;
       }
-<<<<<<< HEAD
 
       const catCombined = [item.category, item.categoryName].filter(Boolean).join(',');
       const tmdbData = await searchTMDB(item.title, { category: catCombined });
 
       let enrichedItem = {
-=======
-      
-      const catCombined = [item.category, item.categoryName].filter(Boolean).join(',');
-      const tmdbData = await searchTMDB(item.title, { category: catCombined });
-      
-      enrichedItems.push({
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
         ...item,
         tmdb: tmdbData || null,
       };
@@ -345,11 +323,7 @@ export async function enrichItemsWithTMDB(items) {
       });
     }
   }
-<<<<<<< HEAD
 
-=======
-  
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   return enrichedItems;
 }
 

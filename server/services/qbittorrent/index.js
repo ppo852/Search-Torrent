@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import { 
   getQBitUserInfo, 
   authenticateQBittorrent, 
@@ -8,10 +7,6 @@ import {
   clearSessionCache,
   getTransferInfo
 } from './client.js';
-=======
-// Point d'entrée du service qBittorrent
-import { getQBitUserInfo, authenticateQBittorrent, makeQBittorrentRequest, addTorrentUrlForUser } from './client.js';
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
 // Exporter toutes les fonctions du service
 export default {
@@ -20,9 +15,6 @@ export default {
   getAuthenticatedQbitConfig,
   makeQBittorrentRequest,
   addTorrentUrlForUser,
-<<<<<<< HEAD
   clearSessionCache,
   getTransferInfo
-=======
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 };

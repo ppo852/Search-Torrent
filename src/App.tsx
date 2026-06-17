@@ -11,7 +11,6 @@ import { MediaDetailPage } from './pages/MediaDetailPage';
 import { LibraryPage } from './pages/LibraryPage';
 import { RequestDetailPage } from './pages/RequestDetailPage';
 import { TvShowRequestPage } from './pages/TvShowRequestPage';
-<<<<<<< HEAD
 import { Layout } from './components/core/Layout';
 
 // Intercepteur global pour rediriger vers le login si la session a expiré (HTTP 401)
@@ -25,9 +24,6 @@ window.fetch = async (...args) => {
   }
   return response;
 };
-=======
-import { Header } from './components/core/Header';
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -109,30 +105,6 @@ export function App() {
               element={
                 <PrivateRoute>
                   <QBittorrentPage />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/library"
-              element={
-                <PrivateRoute>
-                  <LibraryPage />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/library/:id"
-              element={
-                <PrivateRoute>
-                  <RequestDetailPage />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/library/show/:mediaType/:tmdbId"
-              element={
-                <PrivateRoute>
-                  <TvShowRequestPage />
                 </PrivateRoute>
               }
             />

@@ -1,5 +1,4 @@
 import { query, run } from '../core/db.js';
-<<<<<<< HEAD
 import logger from '../core/logger.js';
 import scanner from './scanner.js';
 import fetch from 'node-fetch';
@@ -8,12 +7,6 @@ import { cleanMediaTitle, normalizeTitleForDb } from './utils.js';
 import userService from '../users/index.js';
 import { deleteByPath } from './store.js';
 
-=======
-import scanner from './scanner.js';
-import fetch from 'node-fetch';
-import { getSetting } from '../settings/index.js';
-import { normalizeTitleForSearch, normalizeTitleForDb } from './utils.js';
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
 // normalizeTitle is now provided by utils.normalizeTitleForDb
 
@@ -27,12 +20,9 @@ async function ensureSchema() {
     if (!names.has('original_title')) {
       await run(`ALTER TABLE local_media_inventory ADD COLUMN original_title TEXT NULL`);
     }
-<<<<<<< HEAD
     if (!names.has('tmdb_resolve_attempts')) {
       await run(`ALTER TABLE local_media_inventory ADD COLUMN tmdb_resolve_attempts INTEGER NOT NULL DEFAULT 0`);
     }
-=======
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     // Indexes for performance and upsert reliability
     await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_path ON local_media_inventory(path)`);
     await run(`CREATE INDEX IF NOT EXISTS idx_inventory_kind_title ON local_media_inventory(media_kind, title_normalized, year)`);
@@ -74,7 +64,6 @@ export async function isPresent({ kind, title, year, season, episode, tmdb_id })
       }
     }
 
-<<<<<<< HEAD
     logger.debug('inventory', '[isPresent][by_tmdb_id] input', {
       mediaKind,
       tmdb_id: id,
@@ -84,19 +73,6 @@ export async function isPresent({ kind, title, year, season, episode, tmdb_id })
       where: whereById.join(' AND '),
       params: paramsById
     });
-=======
-    if (dbg) {
-      console.log('[isPresent][by_tmdb_id] input', {
-        mediaKind,
-        tmdb_id: id,
-        title,
-        season,
-        episode,
-        where: whereById.join(' AND '),
-        params: paramsById
-      });
-    }
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
     const rowsById = await query(
       `SELECT id, media_kind, title, year, season, episode, path, size, mtime_ms, tmdb_id
@@ -106,7 +82,6 @@ export async function isPresent({ kind, title, year, season, episode, tmdb_id })
        LIMIT 25`,
       paramsById
     );
-<<<<<<< HEAD
     logger.debug('inventory', '[isPresent][by_tmdb_id] result', {
       count: (rowsById || []).length,
       matches: (rowsById || []).slice(0, 3).map((r) => ({
@@ -117,20 +92,6 @@ export async function isPresent({ kind, title, year, season, episode, tmdb_id })
         tmdb_id: r.tmdb_id
       }))
     });
-=======
-    if (dbg) {
-      console.log('[isPresent][by_tmdb_id] result', {
-        count: (rowsById || []).length,
-        matches: (rowsById || []).slice(0, 3).map((r) => ({
-          title: r.title,
-          season: r.season,
-          episode: r.episode,
-          path: r.path,
-          tmdb_id: r.tmdb_id
-        }))
-      });
-    }
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     if ((rowsById || []).length > 0) return { present: true, matches: rowsById };
   }
 
@@ -168,7 +129,6 @@ export async function isPresent({ kind, title, year, season, episode, tmdb_id })
     params
   );
 
-<<<<<<< HEAD
   logger.debug('inventory', '[isPresent][by_title] input', {
     mediaKind,
     title,
@@ -189,30 +149,6 @@ export async function isPresent({ kind, title, year, season, episode, tmdb_id })
       tmdb_id: r.tmdb_id
     }))
   });
-=======
-  if (dbg) {
-    console.log('[isPresent][by_title] input', {
-      mediaKind,
-      title,
-      title_normalized: titleNorm,
-      year,
-      season,
-      episode,
-      where: where.join(' AND '),
-      params
-    });
-    console.log('[isPresent][by_title] result', {
-      count: (rows || []).length,
-      matches: (rows || []).slice(0, 3).map((r) => ({
-        title: r.title,
-        season: r.season,
-        episode: r.episode,
-        path: r.path,
-        tmdb_id: r.tmdb_id
-      }))
-    });
-  }
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
   if ((rows || []).length > 0) {
     return { present: true, matches: rows };
@@ -221,7 +157,6 @@ export async function isPresent({ kind, title, year, season, episode, tmdb_id })
   return { present: false, matches: [] };
 }
 
-<<<<<<< HEAD
 /**
  * Récupère tous les épisodes présents pour une saison donnée (Batch check)
  */
@@ -314,15 +249,6 @@ export async function scanNow() {
     const res = await resolveMissingTmdbIds({ limit: 100 });
     if (res) {
       logger.debug('inventory', 'TMDB resolver done', res);
-=======
-export async function scanNow({ moviesPath, seriesPath }) {
-  await ensureSchema();
-  const summary = await scanner.scanAndSync({ moviesPath, seriesPath });
-  try {
-    const res = await resolveMissingTmdbIds({ limit: 100 });
-    if (res) {
-      console.log('[media-inventory] TMDB resolver done', res);
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     }
   } catch {
     // ignore resolver errors
@@ -332,14 +258,6 @@ export async function scanNow({ moviesPath, seriesPath }) {
 
 // Note: upsertMany/deleteMissingPaths are implemented in server/services/media-inventory/store.js
 
-<<<<<<< HEAD
-=======
-export default {
-  isPresent,
-  scanNow
-};
-
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 // similarity helper kept minimal within resolver scope
 function similarity(a, b) {
   const ta = new Set(String(a || '').toLowerCase().split(/\s+/).filter(Boolean));
@@ -351,7 +269,6 @@ function similarity(a, b) {
   return inter / denom;
 }
 
-<<<<<<< HEAD
 // Max TMDB API resolution tries per inventory row (then abandoned, anti-doublon still uses title/year/S/E)
 const MAX_TMDB_RESOLVE_ATTEMPTS = 2;
 
@@ -476,13 +393,10 @@ async function resolveTmdbForRow(row, token) {
   return { resolved: false, abandoned: false };
 }
 
-=======
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 async function resolveMissingTmdbIds({ limit = 100 } = {}) {
   const token = await getSetting('tmdb_access_token');
   if (!token) {
     console.warn('[media-inventory] TMDB resolver skipped: tmdb_access_token not set');
-<<<<<<< HEAD
     return { candidates: 0, resolved: 0, abandoned: 0 };
   }
 
@@ -546,115 +460,3 @@ export default {
   ingestFile,
   removeFile,
 };
-=======
-    return { candidates: 0, resolved: 0 };
-  }
-
-  const candidates = await query(
-    `SELECT id, media_kind, title, title_normalized, year
-     FROM local_media_inventory
-     WHERE tmdb_id IS NULL AND media_kind IN ('movie', 'tv')
-     ORDER BY mtime_ms DESC
-     LIMIT ?`,
-    [limit]
-  );
-
-  let resolved = 0;
-  for (const row of candidates || []) {
-    const title = normalizeTitleForSearch(row.title || '');
-    if (!title) continue;
-    
-    const runSearch = async (q, opts = {}) => {
-      const isTv = row.media_kind === 'tv';
-      const url = new URL(isTv ? 'https://api.themoviedb.org/3/search/tv' : 'https://api.themoviedb.org/3/search/movie');
-      url.searchParams.set('query', q);
-      if (!isTv && opts.year) url.searchParams.set('year', String(opts.year));
-      url.searchParams.set('language', opts.language || 'en-US');
-      const resp = await fetch(url.toString(), {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${String(token)}`, 'Content-Type': 'application/json' }
-      });
-      if (!resp.ok) return [];
-      const data = await resp.json().catch(() => ({}));
-      const arr = Array.isArray(data?.results) ? data.results : [];
-      console.log('[media-inventory] TMDB search', { kind: isTv ? 'tv' : 'movie', q, year: opts.year || null, language: opts.language || 'en-US', count: arr.length });
-      return arr;
-    };
-
-    const tryScoredBest = (results) => {
-      let best = null;
-      let bestScore = 0;
-      let bestTitleScore = 0;
-      let bestRelYear = null;
-      for (const r of results) {
-        const isTv = row.media_kind === 'tv';
-        const rTitle = normalizeTitleForSearch(
-          isTv ? (r?.name || r?.original_name || '') : (r?.title || r?.original_title || '')
-        );
-        const scoreTitle = similarity(title, rTitle);
-        const relYear = isTv
-          ? (r?.first_air_date ? Number(String(r.first_air_date).slice(0, 4)) : null)
-          : (r?.release_date ? Number(String(r.release_date).slice(0, 4)) : null);
-
-        const scoreYear = (!isTv && row.year)
-          ? (relYear != null && Math.abs(relYear - row.year) <= 1 ? 1 : 0)
-          : 0.5;
-
-        const score = 0.7 * scoreTitle + 0.3 * scoreYear;
-        if (score > bestScore) { bestScore = score; best = r; bestTitleScore = scoreTitle; bestRelYear = relYear; }
-      }
-      return { best, bestScore, bestTitleScore, bestRelYear };
-    };
-
-    // Phase 1: query with year (en-US) for movies; TV ignores year
-    let results = [];
-    try { results = await runSearch(title, { year: row.year, language: 'en-US' }); } catch {}
-    let { best, bestScore, bestTitleScore, bestRelYear } = tryScoredBest(results);
-
-    // Phase 2: if not confident, try without year (en-US)
-    if (!(best && (bestScore >= 0.85 || (bestTitleScore >= 0.8 && row.year && bestRelYear === row.year)))) {
-      try { results = await runSearch(title, { language: 'en-US' }); } catch {}
-      ({ best, bestScore, bestTitleScore, bestRelYear } = tryScoredBest(results));
-    }
-
-    // Phase 3: if still not confident, try fr-FR
-    if (!(best && (bestScore >= 0.85 || (bestTitleScore >= 0.8 && row.year && bestRelYear === row.year)))) {
-      try { results = await runSearch(title, { year: row.year, language: 'fr-FR' }); } catch {}
-      ({ best, bestScore, bestTitleScore, bestRelYear } = tryScoredBest(results));
-      if (!(best && (bestScore >= 0.85 || (bestTitleScore >= 0.8 && row.year && bestRelYear === row.year)))) {
-        try { results = await runSearch(title, { language: 'fr-FR' }); } catch {}
-        ({ best, bestScore, bestTitleScore, bestRelYear } = tryScoredBest(results));
-      }
-    }
-
-    const isTv = row.media_kind === 'tv';
-    const confident = isTv
-      ? (bestScore >= 0.85 || bestTitleScore >= 0.85)
-      : (bestScore >= 0.85 || (bestTitleScore >= 0.8 && row.year && bestRelYear === row.year));
-
-    if (best && Number.isInteger(best?.id) && confident) {
-      await run(
-        `UPDATE local_media_inventory
-         SET tmdb_id = ?, original_title = ?
-         WHERE id = ?`,
-        [best.id,
-         (isTv ? (best.original_name || best.name) : (best.original_title || best.title)) || null,
-         row.id]
-      );
-      resolved++;
-      console.log('[media-inventory] TMDB resolved', {
-        local: { title: row.title, year: row.year, kind: row.media_kind },
-        match: {
-          id: best.id,
-          title: isTv ? (best.name || best.original_name) : best.title,
-          release_date: isTv ? best.first_air_date : best.release_date
-        },
-        score: Number(bestScore.toFixed(3))
-      });
-    } else {
-      console.log('[media-inventory] TMDB unresolved', { local: { title: row.title, year: row.year, kind: row.media_kind }, bestScore: Number((bestScore || 0).toFixed(3)) });
-    }
-  }
-  return { candidates: (candidates || []).length, resolved };
-}
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed

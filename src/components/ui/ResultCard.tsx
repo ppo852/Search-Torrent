@@ -1,21 +1,12 @@
 import { useState } from 'react';
-<<<<<<< HEAD
 import { CalendarDays, Download, Users, BookmarkPlus, HardDrive } from 'lucide-react';
 import type { CategoryType, SearchResult } from '../../types';
-=======
-import { CalendarDays, Download, Users, BookmarkPlus } from 'lucide-react';
-import { SearchResult } from '../../types';
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 import { formatSize, formatDate } from '../../lib/formatters';
 import { getCategoryLabel } from '../../lib/categories';
 
 interface ResultCardProps {
   result: SearchResult;
-<<<<<<< HEAD
   onDownload: (result: SearchResult) => void | Promise<void>;
-=======
-  onDownload: (result: SearchResult) => void;
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   onTrack?: () => void | Promise<void>;
   isSearchResult?: boolean;
   poster?: string | null;
@@ -24,7 +15,6 @@ interface ResultCardProps {
   validationError?: string | null;
 }
 
-<<<<<<< HEAD
 export function ResultCard({ 
   result, 
   onDownload, 
@@ -36,16 +26,11 @@ export function ResultCard({
   validationError 
 }: ResultCardProps) {
   const [isDownloading, setIsDownloading] = useState(false);
-=======
-export function ResultCard({ result, onDownload, onTrack, isSearchResult = false, poster }: ResultCardProps) {
-  const [tmdbError] = useState<string | null>(null);
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
   const translateCategory = (category?: string, name?: string, categoryId?: number): string => {
     return getCategoryLabel(categoryId, category, name, forcedCategory, searchContext);
   };
 
-<<<<<<< HEAD
   const hostname = (() => {
     try {
       return result.engine_url ? new URL(result.engine_url).hostname : '';
@@ -64,8 +49,6 @@ export function ResultCard({ result, onDownload, onTrack, isSearchResult = false
     }
   };
 
-=======
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   return (
     <div className={`glass-card p-4 group transition-all duration-300 hover:scale-[1.01] hover:shadow-blue-500/5 ${
       validationError 
@@ -95,39 +78,6 @@ export function ResultCard({ result, onDownload, onTrack, isSearchResult = false
                   {validationError}
                 </div>
               )}
-<<<<<<< HEAD
-=======
-              
-              {/* Sources (seeders) avec icône */}
-              <span className="text-green-500">
-                <Users className="h-3 w-3 inline mr-1" />
-                {result.seeds}
-              </span>
-              
-              {/* Leechers avec icône */}
-              <span className="text-red-500">
-                <Download className="h-3 w-3 inline mr-1" />
-                {result.leech}
-              </span>
-              
-              {/* Catégorie avec icône */}
-              <span className="text-purple-400">📁 {translateCategory(result.category)}</span>
-              
-              {/* Indexer avec icône */}
-              {result.engine_url && (
-                <span className="text-blue-400">
-                  🔗 {
-                    (() => {
-                      try {
-                        return new URL(result.engine_url).hostname;
-                      } catch {
-                        return result.engine_url;
-                      }
-                    })()
-                  }
-                </span>
-              )}
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
             </div>
 
             <div className="flex flex-wrap items-center gap-y-2 gap-x-2 md:gap-x-3">
@@ -164,7 +114,6 @@ export function ResultCard({ result, onDownload, onTrack, isSearchResult = false
             </div>
           </div>
         </div>
-<<<<<<< HEAD
 
         <div className="flex md:flex-col gap-2 w-full md:w-auto">
           {onTrack && (
@@ -174,17 +123,6 @@ export function ResultCard({ result, onDownload, onTrack, isSearchResult = false
             >
               <BookmarkPlus size={18} className="text-blue-400" />
               <span>Suivre</span>
-=======
-        <div className="flex justify-end md:justify-start mt-2 md:mt-0 gap-2">
-          {onTrack && (
-            <button
-              onClick={() => onTrack()}
-              className="flex items-center gap-1 px-3 py-2 md:px-2 md:py-1 bg-gray-700 hover:bg-gray-600 rounded transition-colors shrink-0"
-              title="Ajouter au suivi"
-            >
-              <BookmarkPlus className="h-4 w-4" />
-              <span className="text-sm">Suivre</span>
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
             </button>
           )}
           <button

@@ -26,26 +26,6 @@ async function getQbitContext(req) {
   return getQbitContextForUserId(req, req.user.id);
 }
 
-async function getQbitContextForUserId(req, userId) {
-  const user = await qBittorrentService.getQBitUserInfo(req.app.locals.db, userId);
-  if (!user?.qbit_url) {
-    return { user, qbitUrl: null, cookies: '' };
-  }
-
-  const qbitUrl = user.qbit_url.trim().replace(/\/+$/, '');
-  let cookies = '';
-
-  if (user.qbit_username && user.qbit_password) {
-    cookies = await qBittorrentService.authenticateQBittorrent(qbitUrl, user.qbit_username, user.qbit_password);
-  }
-
-  return { user, qbitUrl, cookies };
-}
-
-async function getQbitContext(req) {
-  return getQbitContextForUserId(req, req.user.id);
-}
-
 /**
  * Récupère la liste des torrents
  */
@@ -240,7 +220,6 @@ export async function addTorrentHandler(req, res) {
       tags = req.body.options.tags;
     }
 
-<<<<<<< HEAD
     const torrentName = req.body.name || (req.body.options && req.body.options.name);
     const force = !!(req.body?.force);
 
@@ -262,8 +241,6 @@ export async function addTorrentHandler(req, res) {
       });
     }
 
-=======
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     // Si on a des fichiers, on utilise l'upload (.torrent)
     const hasFiles = !!(req.files && Object.keys(req.files).length > 0);
     if (hasFiles) {

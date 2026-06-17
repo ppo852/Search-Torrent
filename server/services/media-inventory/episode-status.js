@@ -1,7 +1,6 @@
 import { query, run } from '../core/db.js';
 import mediaInventoryService from './index.js';
 import { getSetting } from '../settings/index.js';
-<<<<<<< HEAD
 import logger from '../core/logger.js';
 import {
   isEpisodeTorrentInQbit,
@@ -118,51 +117,27 @@ export async function reconcileStaleTvEpisodeDownloads(options = {}) {
 
   return { markedError, errorEpisodesByRequest };
 }
-=======
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
 /**
  * Update status of downloading episodes when files are detected in inventory
  */
 export async function updateDownloadingEpisodesStatus() {
   try {
-<<<<<<< HEAD
     logger.debug('inventory', 'Vérification des épisodes en téléchargement...');
     
     const downloadingEpisodes = await query(
       `SELECT d.tv_season_request_id, d.episode_number, r.title, r.season_number, r.tmdb_id
-=======
-    const dbg = ['1', 'true', 'yes'].includes(String(process.env.DEBUG_MEDIA_EP_STATUS || '').toLowerCase());
-    if (dbg) {
-      console.log('[MediaInventory] Vérification des épisodes en téléchargement...');
-    }
-    
-    const downloadingEpisodes = await query(
-      `SELECT d.id, d.tv_season_request_id, d.episode_number, r.title, r.season_number, r.tmdb_id
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
        FROM tv_episode_downloads d
        JOIN tv_season_requests r ON r.id = d.tv_season_request_id
        WHERE d.status = 'downloading'`
     );
 
     if (!downloadingEpisodes || downloadingEpisodes.length === 0) {
-<<<<<<< HEAD
       logger.debug('inventory', 'Aucun épisode en statut "downloading"');
       return 0;
     }
     
     logger.debug('inventory', `${downloadingEpisodes.length} épisode(s) en téléchargement à vérifier`);
-=======
-      if (dbg) {
-        console.log('[MediaInventory] Aucun épisode en statut "downloading"');
-      }
-      return 0;
-    }
-    
-    if (dbg) {
-      console.log(`[MediaInventory] ${downloadingEpisodes.length} épisode(s) en téléchargement à vérifier`);
-    }
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
     let updatedCount = 0;
     const now = new Date().toISOString();
@@ -177,7 +152,6 @@ export async function updateDownloadingEpisodesStatus() {
         tmdb_id: ep.tmdb_id
       });
 
-<<<<<<< HEAD
       logger.debug('inventory', `Check "${ep.title}" S${ep.season_number}E${ep.episode_number} => present=${present?.present}`);
 
       if (present?.present) {
@@ -187,18 +161,6 @@ export async function updateDownloadingEpisodesStatus() {
           episodeNumber: ep.episode_number,
           completedAt: now
         });
-=======
-      if (dbg) {
-        console.log(`[MediaInventory] Check "${ep.title}" S${ep.season_number}E${ep.episode_number} => present=${present?.present}`);
-      }
-
-      if (present?.present) {
-        // eslint-disable-next-line no-await-in-loop
-        await run(
-          `UPDATE tv_episode_downloads SET status = 'completed', completed_at = ? WHERE id = ?`,
-          [now, ep.id]
-        );
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
         updatedCount++;
       }
     }
@@ -249,43 +211,25 @@ export async function updateDownloadingEpisodesStatus() {
         );
       }
 
-<<<<<<< HEAD
       if (completedMarked > 0) {
         logger.debug('inventory', `${completedMarked} film(s) passé(s) en 'completed'`);
-=======
-      if (dbg && completedMarked > 0) {
-        console.log(`[MediaInventory] ${completedMarked} film(s) passé(s) en 'completed'`);
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
       }
     } catch {
       // ignore
     }
 
-<<<<<<< HEAD
     if (updatedCount > 0) {
       logger.debug('inventory', `${updatedCount} épisode(s) passé(s) de 'downloading' à 'completed'`);
-=======
-    if (dbg && updatedCount > 0) {
-      console.log(`[MediaInventory] ${updatedCount} épisode(s) passé(s) de 'downloading' à 'completed'`);
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     }
 
     return updatedCount;
   } catch (error) {
-<<<<<<< HEAD
     logger.error('[MediaInventory] Erreur mise à jour statuts épisodes:', error);
-=======
-    console.error('[MediaInventory] Erreur mise à jour statuts épisodes:', error);
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     return 0;
   }
 }
 
-<<<<<<< HEAD
 export default {
   updateDownloadingEpisodesStatus,
   reconcileStaleTvEpisodeDownloads
 };
-=======
-export default { updateDownloadingEpisodesStatus };
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed

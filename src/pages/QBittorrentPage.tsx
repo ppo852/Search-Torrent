@@ -4,10 +4,7 @@ import { Trash2, ArrowDown, X, Upload, Pause, Play } from 'lucide-react';
 import { StatsDisplay } from '../components/Stats/StatsDisplay';
 import { useQBittorrentStats } from '../hooks/useQBittorrentStats';
 import { Torrent, SortField } from '../types/qbittorrent';
-<<<<<<< HEAD
 import { getTrackerName } from '../utils/torrentUtils';
-=======
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 import { 
   TorrentList, 
   TorrentListPagination, 
@@ -37,14 +34,7 @@ export const QBittorrentPage: React.FC = () => {
     direction: 'desc'
   });
   
-<<<<<<< HEAD
   const { stats } = useQBittorrentStats();
-=======
-  // Stats
-  const { stats } = useQBittorrentStats();
-  
-  // Refs
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   const torrentsContainerRef = useRef<HTMLDivElement>(null);
   
   const fetchTorrents = async () => {
@@ -63,37 +53,12 @@ export const QBittorrentPage: React.FC = () => {
           setTorrents(arr);
         }
       } else if (data.torrents) {
-<<<<<<< HEAD
         setTorrents((prev) => {
           let next = [...prev];
           Object.entries(data.torrents).forEach(([hash, t]: [string, any]) => {
             const idx = next.findIndex(item => item.hash === hash);
             if (idx >= 0) next[idx] = { ...next[idx], ...t, hash };
             else next.push({ hash, ...t });
-=======
-        // Mise à jour partielle - ajouter/modifier les torrents existants
-        setTorrents((prevTorrents: Torrent[]) => {
-          const updatedTorrents = [...prevTorrents];
-          
-          // Mettre à jour ou ajouter les torrents modifiés
-          Object.entries(data.torrents).forEach(([hash, torrentData]: [string, any]) => {
-            const existingIndex = updatedTorrents.findIndex(t => t.hash === hash);
-            
-            if (existingIndex >= 0) {
-              // Mettre à jour un torrent existant
-              updatedTorrents[existingIndex] = {
-                ...updatedTorrents[existingIndex],
-                ...torrentData,
-                hash
-              };
-            } else {
-              // Ajouter un nouveau torrent
-              updatedTorrents.push({
-                hash,
-                ...torrentData
-              });
-            }
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
           });
           if (data.torrents_removed) next = next.filter(t => !data.torrents_removed.includes(t.hash));
           return next;
@@ -116,57 +81,12 @@ export const QBittorrentPage: React.FC = () => {
         const data = await response.json();
         setCategories(Object.keys(data));
       }
-<<<<<<< HEAD
     } catch (err) {}
   };
 
   const { filteredTorrents, searchQuery, setSearchQuery, currentStatus, setCurrentStatus, currentCategory, setCurrentCategory } = useTorrentFilters({ torrents });
   const { api: torrentApi, selectedTorrents, isDeleteModalOpen, deleteWithFiles, setDeleteWithFiles, toggleTorrentSelection, deselectAllTorrents, handleSingleDelete, handleMultipleDelete, confirmDelete, cancelDelete, torrentToDelete } = useTorrentActions({ fetchTorrents });
   const { isModalOpen: isAddModalOpen, openModal: openAddModal, closeModal: closeAddModal } = useTorrentUpload(() => { fetchTorrents(); fetchCategories(); });
-=======
-      
-      const data = await response.json();
-      setCategories(Object.keys(data));
-    } catch (err) {
-      // ignore
-    }
-  };
-
-  // Utiliser nos hooks personnalisés
-  const { 
-    filteredTorrents, 
-    searchQuery, 
-    setSearchQuery, 
-    currentStatus, 
-    setCurrentStatus, 
-    currentCategory, 
-    setCurrentCategory 
-  } = useTorrentFilters({ torrents });
-  
-  const {
-    api: torrentApi,
-    selectedTorrents,
-    isDeleteModalOpen,
-    deleteWithFiles,
-    setDeleteWithFiles,
-    toggleTorrentSelection,
-    deselectAllTorrents,
-    handleSingleDelete,
-    handleMultipleDelete,
-    confirmDelete,
-    cancelDelete,
-    torrentToDelete
-  } = useTorrentActions({ fetchTorrents });
-  
-  const {
-    isModalOpen: isAddModalOpen,
-    openModal: openAddModal,
-    closeModal: closeAddModal
-  } = useTorrentUpload(() => {
-    fetchTorrents();
-    fetchCategories();
-  });
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
   const { isDragging, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = useGlobalDragAndDrop((files) => {
     setDroppedTorrentFiles(files);
@@ -174,7 +94,6 @@ export const QBittorrentPage: React.FC = () => {
     setInvalidDrop(false);
   });
 
-<<<<<<< HEAD
   const sortedTorrents = useMemo(() => {
     return [...filteredTorrents].sort((a, b) => {
       let vA = (a as any)[sorting.field] ?? '';
@@ -194,29 +113,6 @@ export const QBittorrentPage: React.FC = () => {
     });
   }, [filteredTorrents, sorting]);
 
-=======
-  const getSortValue = (t: Torrent, field: SortField) => {
-    return (t as any)[field];
-  };
-  
-  // Tri des torrents
-  const sortedTorrents = [...filteredTorrents].sort((a, b) => {
-    let valueA = getSortValue(a, sorting.field);
-    let valueB = getSortValue(b, sorting.field);
-    
-    // Gestion spéciale pour certains champs
-    if (sorting.field === 'name') {
-      valueA = valueA.toLowerCase();
-      valueB = valueB.toLowerCase();
-    }
-    
-    if (valueA < valueB) return sorting.direction === 'asc' ? -1 : 1;
-    if (valueA > valueB) return sorting.direction === 'asc' ? 1 : -1;
-    return 0;
-  });
-  
-  // Pagination
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   const totalPages = Math.ceil(sortedTorrents.length / itemsPerPage);
   const paginatedTorrents = sortedTorrents.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
   
@@ -357,24 +253,7 @@ export const QBittorrentPage: React.FC = () => {
       )}
 
       {isAddModalOpen && (
-<<<<<<< HEAD
         <TorrentAddModal isOpen={isAddModalOpen} onClose={() => { closeAddModal(); setDroppedTorrentFiles([]); }} categories={categories} onSuccess={fetchTorrents} initialFiles={droppedTorrentFiles} onCategoryCreated={(cat) => setCategories(prev => [...prev, cat])} />
-=======
-        <TorrentAddModal
-          isOpen={isAddModalOpen}
-          onClose={() => {
-            closeAddModal();
-            setDroppedTorrentFiles([]);
-          }}
-          categories={categories}
-          onSuccess={fetchTorrents}
-          initialFiles={droppedTorrentFiles}
-          onCategoryCreated={(newCategory) => {
-            // Mettre à jour la liste des catégories après la création d'une nouvelle catégorie
-            setCategories((prevCategories: string[]) => [...prevCategories, newCategory]);
-          }}
-        />
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
       )}
       
       <TorrentDeleteModal isOpen={isDeleteModalOpen} onClose={cancelDelete} onConfirm={confirmDelete} deleteWithFiles={deleteWithFiles} setDeleteWithFiles={setDeleteWithFiles} isSingleDelete={!!torrentToDelete} selectedCount={selectedTorrents.size} />

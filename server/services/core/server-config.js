@@ -24,10 +24,7 @@ import libraryRoutes from '../../routes/library/index.js';
 import mediaInventoryRoutes from '../../routes/media-inventory/index.js';
 import tmdbRoutes from '../../routes/tmdb/index.js';
 import prowlarrRoutes from '../../routes/prowlarr/index.js';
-<<<<<<< HEAD
 import systemRoutes from '../../routes/system/index.js';
-=======
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -86,10 +83,7 @@ export function configureServer() {
   app.use('/api/media-inventory', mediaInventoryRoutes);
   app.use('/api/tmdb', tmdbRoutes);
   app.use('/api/prowlarr', prowlarrRoutes);
-<<<<<<< HEAD
   app.use('/api/system', systemRoutes);
-=======
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   
   // Route de compatibilité pour maintenir l'ancien endpoint de login
   app.post('/api/login', (req, res) => {

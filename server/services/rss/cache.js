@@ -1,11 +1,7 @@
 import { randomUUID } from 'crypto';
 import { get, run } from '../core/db.js';
-<<<<<<< HEAD
 import logger from '../core/logger.js';
 import { cleanMediaTitle } from '../media-inventory/utils.js';
-=======
-import { normalizeTitleForSearch } from '../media-inventory/utils.js';
->>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
 /**
  * Récupère les données du cache RSS
