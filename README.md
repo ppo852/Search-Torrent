@@ -67,26 +67,16 @@ Pour que Search-Torrent envoie correctement les catégories (`Films`, `Séries`,
 
 **Paramètres → Téléchargements**
 
-- **Mode de gestion par défaut** → **Automatique**
+- **Mode de gestion de torrent par défaut** → **Automatique**
+- **Lorsque la catégorie du torrent change** → **Déplacer le torrent**
 
-Sans ce réglage, la catégorie peut être assignée mais les fichiers restent dans le dossier de téléchargement par défaut.
+Ces deux réglages sont le minimum pour que Search-Torrent puisse assigner une catégorie (`Films`, `Séries`, `Anime`, etc.) et que qBittorrent range le torrent au bon endroit.
 
-### 3. Catégories avec chemins de sauvegarde
+### 3. Catégories — création automatique
 
-Dans qBittorrent, créez les catégories utilisées par Search-Torrent et définissez un chemin pour chacune :
+**Vous n'avez pas besoin de créer les catégories à la main.** Quand Search-Torrent envoie un torrent avec une catégorie, qBittorrent la **crée automatiquement** si elle n'existe pas encore (`Films`, `Séries`, `Anime`, `Musique`, `Logiciels`, `Jeux`, `Livres`, `Autres`…).
 
-| Catégorie | Exemple |
-|-----------|---------|
-| Films | `/downloads/Films` |
-| Séries | `/downloads/Séries` |
-| Anime | `/downloads/Anime` |
-| Musique | `/downloads/Musique` |
-| Logiciels | `/downloads/Logiciels` |
-| Jeux | `/downloads/Jeux` |
-| Livres | `/downloads/Livres` |
-| Autres | `/downloads/Autres` |
-
-Clic droit sur une catégorie → **Définir le chemin de sauvegarde** (libellé selon la version de qBittorrent).
+> **Optionnel** — si vous voulez un dossier spécifique par catégorie dès le départ, vous pouvez définir le chemin de sauvegarde après coup : clic droit sur la catégorie dans qBittorrent → **Définir le chemin de sauvegarde**. Sinon, qBittorrent utilise le dossier de téléchargement par défaut + sous-dossier de la catégorie.
 
 ## Variables d'environnement
 
