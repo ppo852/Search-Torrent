@@ -1,0 +1,25 @@
+# Copiez ce fichier en docker-compose.dev.yml (gitignoré) pour le dev local :
+#   cp docker-compose.dev.yml.example docker-compose.dev.yml
+# Puis adaptez ports, volumes et secrets selon votre machine.
+
+services:
+  search-torrent:
+    build: .
+    container_name: search-torrent-dev
+    ports:
+      - "4000:80"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - JWT_SECRET=dev_secret_changez_moi
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=admin
+      - LOG_LEVEL=debug
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped

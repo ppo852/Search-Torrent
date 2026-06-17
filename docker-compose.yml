@@ -1,18 +1,17 @@
-
 services:
   search-torrent:
-    build: .
+    image: ppo852/search-torrent:1.6.3
     container_name: search-torrent
     ports:
       - "4000:80"
     volumes:
-      - ./data:/app/data  # Pour la base SQLite
+      - ./data:/app/data
     environment:
       - NODE_ENV=production
-      - PORT=3001  # Port du backend
-      - JWT_SECRET=change_this_to_a_secure_secret
+      - JWT_SECRET=changez_moi_avec_une_longue_chaine_aleatoire
       - ADMIN_USERNAME=admin
-      - ADMIN_PASSWORD=admin # Changez-le ici pour le premier démarrage
+      - ADMIN_PASSWORD=changez_moi
+      - LOG_LEVEL=info
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80"]
       interval: 30s
