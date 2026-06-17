@@ -2,6 +2,8 @@ import parser from './parser.js';
 import cache from './cache.js';
 import tmdb from './tmdb.js';
 import * as db from '../core/db.js';
+import logger from '../core/logger.js';
+import { deleteAppCacheByPrefix } from '../core/app-cache.js';
 
 /**
  * Récupère un flux RSS avec gestion du cache
@@ -11,7 +13,11 @@ import * as db from '../core/db.js';
  * @returns {Promise<Array>} Éléments du flux RSS
  */
 export async function fetchRSSFeedWithCache(feedId, url, options = {}) {
-  const { forceRefresh = false, includeTMDB = true } = options;
+  const {
+    forceRefresh = false,
+    includeTMDB = true,
+    invalidateHomeCache = true,
+  } = options;
   
   try {
     let items = [];
@@ -23,7 +29,7 @@ export async function fetchRSSFeedWithCache(feedId, url, options = {}) {
       const cachedData = await cache.getRSSCache(feedId, url);
       
       if (cachedData) {
-        // [DEBUG ONLY] console.log(`Cache trouvé pour le flux ${feedId}`);
+        logger.debug('rss', `Cache trouvé pour le flux ${feedId}`);
         
         if (includeTMDB && cachedData.items_with_tmdb_json) {
           return {
@@ -42,7 +48,7 @@ export async function fetchRSSFeedWithCache(feedId, url, options = {}) {
     }
     
     // Si aucun cache valide ou forceRefresh demandé, récupérer les nouvelles données
-    // [DEBUG ONLY] console.log(`Récupération du flux RSS ${url} (ID: ${feedId})`);
+    logger.debug('rss', `Récupération du flux RSS ${url} (ID: ${feedId})`);
     items = await parser.parseRSSFeed(url);
     
     // Sauvegarder les données brutes
@@ -59,6 +65,9 @@ export async function fetchRSSFeedWithCache(feedId, url, options = {}) {
     
     // Sauvegarder dans le cache
     await cache.saveRSSCache(feedId, url, itemsJson, itemsWithTMDBJson);
+    if (invalidateHomeCache) {
+      await deleteAppCacheByPrefix('recent-home:');
+    }
     
     return {
       items,
@@ -66,13 +75,13 @@ export async function fetchRSSFeedWithCache(feedId, url, options = {}) {
       fromExpiredCache
     };
   } catch (error) {
-    console.error(`Erreur lors de la récupération du flux RSS ${feedId}:`, error);
+    logger.error(`Erreur lors de la récupération du flux RSS ${feedId}:`, error);
     
     // En cas d'erreur, essayer de récupérer depuis le cache même s'il est expiré
     const expiredCache = await cache.getRSSCache(feedId, url, true);
     
     if (expiredCache) {
-      // [DEBUG ONLY] console.log(`Utilisation du cache expiré pour le flux ${feedId} suite à une erreur`);
+      logger.debug('rss', `Utilisation du cache expiré pour le flux ${feedId} suite à une erreur`);
       
       if (includeTMDB && expiredCache.items_with_tmdb_json) {
         return {
@@ -100,32 +109,36 @@ export async function fetchRSSFeedWithCache(feedId, url, options = {}) {
  */
 export async function refreshPopularRSSFeeds() {
   try {
-    // [DEBUG ONLY] console.log('Début du rafraîchissement des flux RSS populaires...');
+    logger.debug('rss', 'Début du rafraîchissement des flux RSS populaires...');
     
     // Récupérer les flux RSS globaux
-    const feeds = await db.query('SELECT * FROM global_rss_feeds ORDER BY created_at DESC LIMIT 5');
+    const feeds = await db.query('SELECT * FROM global_rss_feeds ORDER BY created_at DESC');
     
     if (!feeds || feeds.length === 0) {
-      // [DEBUG ONLY] console.log('Aucun flux RSS trouvé à rafraîchir');
+      logger.debug('rss', 'Aucun flux RSS trouvé à rafraîchir');
       return;
     }
     
-    // [DEBUG ONLY] console.log(`Rafraîchissement de ${feeds.length} flux RSS...`);
+    logger.debug('rss', `Rafraîchissement de ${feeds.length} flux RSS...`);
     
     // Rafraîchir chaque flux en forçant la mise à jour du cache
     for (const feed of feeds) {
       try {
-        await fetchRSSFeedWithCache(feed.id, feed.feed_url, { forceRefresh: true });
-        // [DEBUG ONLY] console.log(`Flux ${feed.feed_name} (${feed.id}) rafraîchi avec succès`);
+        await fetchRSSFeedWithCache(feed.id, feed.feed_url, {
+          forceRefresh: true,
+          invalidateHomeCache: false,
+        });
+        logger.debug('rss', `Flux ${feed.feed_name} (${feed.id}) rafraîchi avec succès`);
       } catch (error) {
-        console.error(`Erreur lors du rafraîchissement du flux ${feed.feed_name} (${feed.id}):`, error);
+        logger.error(`Erreur lors du rafraîchissement du flux ${feed.feed_name} (${feed.id}):`, error);
         // Continuer avec les autres flux même en cas d'erreur
       }
     }
     
-    // [DEBUG ONLY] console.log('Rafraîchissement des flux RSS populaires terminé');
+    await deleteAppCacheByPrefix('recent-home:');
+    logger.debug('rss', 'Cache accueil trackers invalidé après resync RSS');
   } catch (error) {
-    console.error('Erreur lors du rafraîchissement des flux RSS populaires:', error);
+    logger.error('Erreur lors du rafraîchissement des flux RSS populaires:', error);
   }
 }
 

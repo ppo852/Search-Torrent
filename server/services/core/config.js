@@ -12,7 +12,16 @@ const dataDir = join(rootDir, 'data');
 const dbPath = join(dataDir, 'database.sqlite');
 
 // Configuration de l'authentification
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+let JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('❌ CRITICAL ERROR: JWT_SECRET environment variable is missing in production!');
+    console.error('Server will use a temporary secret, but this is EXTREMELY INSECURE.');
+  } else {
+    console.warn('⚠️ Warning: JWT_SECRET is not defined, using default development secret.');
+  }
+  JWT_SECRET = 'dev-secret-keep-it-safe';
+}
 const JWT_EXPIRES_IN = '24h';
 
 // Configuration de l'application
@@ -22,6 +31,21 @@ const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
 // Configuration du cache
 const CACHE_DURATION_MINUTES = 60;
 const TMDB_CACHE_DURATION_DAYS = 7;
+
+// Configuration du compte admin initial
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
+let ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+
+if (!ADMIN_PASSWORD) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('❌ CRITICAL ERROR: ADMIN_PASSWORD environment variable is missing!');
+    console.error('The default password "admin" is BLOCKED in production for security.');
+    ADMIN_PASSWORD = 'PROTECTED_PLEASE_SET_ADMIN_PASSWORD_ENV';
+  } else {
+    console.warn('⚠️ Warning: ADMIN_PASSWORD is not defined, using default "admin" for development.');
+    ADMIN_PASSWORD = 'admin';
+  }
+}
 
 // Export des constantes
 export default {
@@ -36,8 +60,8 @@ export default {
   auth: {
     jwtSecret: JWT_SECRET,
     jwtExpiresIn: JWT_EXPIRES_IN,
-    adminUsername: 'admin',
-    adminDefaultPassword: 'admin'
+    adminUsername: ADMIN_USERNAME,
+    adminDefaultPassword: ADMIN_PASSWORD
   },
   app: {
     port: PORT,

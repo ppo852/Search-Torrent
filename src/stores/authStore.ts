@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { db } from '../services/database';
+import { api } from '../lib/api';
 import { QueryClient } from '@tanstack/react-query';
 
 // Créer une instance de QueryClient pour l'utiliser dans le store
@@ -9,9 +9,9 @@ interface User {
   id: string;
   username: string;
   is_admin: boolean;
+  allow_force_interactive_download?: boolean;
   qbit_url?: string;
   qbit_username?: string;
-  qbit_password?: string;
 }
 
 interface AuthState {
@@ -19,6 +19,7 @@ interface AuthState {
   token: string | null;
   login: (username: string, password: string) => Promise<boolean>;
   logout: () => void;
+  patchUser: (partial: Partial<User>) => void;
 }
 
 // Récupérer l'utilisateur du localStorage au démarrage
@@ -31,7 +32,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   login: async (username: string, password: string) => {
     try {
-      const response = await db.verifyUser(username, password);
+      const response = await api.login(username, password);
       
       if (!response) {
         return false;
@@ -56,9 +57,9 @@ export const useAuthStore = create<AuthState>((set) => ({
           id: user.id,
           username: user.username,
           is_admin: user.is_admin,
+          allow_force_interactive_download: !!user.allow_force_interactive_download,
           qbit_url: user.qbit_url,
           qbit_username: user.qbit_username,
-          qbit_password: user.qbit_password
         }
       });
 
@@ -80,5 +81,14 @@ export const useAuthStore = create<AuthState>((set) => ({
     
     // Réinitialiser le store
     set({ user: null, token: null });
-  }
+  },
+
+  patchUser: (partial) => {
+    set((state) => {
+      if (!state.user) return state;
+      const user = { ...state.user, ...partial };
+      localStorage.setItem('user', JSON.stringify(user));
+      return { user };
+    });
+  },
 }));

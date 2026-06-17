@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Download, RefreshCw } from 'lucide-react';
+import { Download, RefreshCw, Film, Tv, MonitorPlay, Clapperboard, Folder, Music, Book, ChevronRight, CalendarDays, HardDrive, Users, Rss } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
-import { api } from '../../lib/api';
 import { formatSize, formatDate } from '../../lib/formatters';
+import { useInteractiveTorrentDownload } from '../../hooks/useInteractiveTorrentDownload';
 
 interface RssFeed {
   id: string;
@@ -44,13 +44,6 @@ interface RssItem {
     release_date: string;
     vote_average: number;
   } | null;
-}
-
-// Interface pour la réponse API avec statut TMDB
-interface RssApiResponse {
-  items: RssItem[];
-  tmdbAvailable: boolean;
-  fromExpiredCache?: boolean;
 }
 
 function normalizeTmdbType(value: unknown): 'movie' | 'tv' | undefined {
@@ -103,30 +96,40 @@ async function fetchFeeds(token: string): Promise<RssFeed[]> {
   return feeds;
 }
 
-async function fetchFeedItems(feed: RssFeed, token: string): Promise<RssItem[]> {
-  const response = await fetch(`/api/rss/parse?url=${encodeURIComponent(feed.feed_url)}`, {
+interface AllRssItemsResponse {
+  itemsByFeed: Record<string, RssItem[]>;
+  tmdbAvailable: boolean;
+  fromExpiredCache?: boolean;
+}
+
+function processRssItem(item: RssItem): RssItem {
+  return {
+    ...item,
+    ...applyTmdbFields(item),
+  };
+}
+
+async function fetchAllRssItems(token: string, forceRefresh = false): Promise<Record<string, RssItem[]>> {
+  const query = forceRefresh ? '?force_refresh=true' : '';
+  const response = await fetch(`/api/rss/all-items${query}`, {
     headers: {
-      'Authorization': `Bearer ${token}`,
+      Authorization: `Bearer ${token}`,
     },
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.details || 'Failed to fetch RSS feed items');
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to fetch RSS items');
   }
 
-  // La nouvelle structure inclut items, tmdbAvailable et fromExpiredCache
-  const data: RssApiResponse = await response.json();
-  
-  // Transformer les éléments pour assurer la compatibilité avec le code existant
-  const processedItems = data.items.map(item => {
-    return {
-      ...item,
-      ...applyTmdbFields(item),
-      feedName: feed.feed_name
-    };
-  });
-  return processedItems;
+  const data: AllRssItemsResponse = await response.json();
+  const itemsByFeed: Record<string, RssItem[]> = {};
+
+  for (const [feedId, items] of Object.entries(data.itemsByFeed || {})) {
+    itemsByFeed[feedId] = items.map(processRssItem);
+  }
+
+  return itemsByFeed;
 }
 
 interface GroupedItems {
@@ -137,25 +140,39 @@ interface GroupedItems {
 interface TitleWithPosterProps {
   poster: string | null;
   originalTitle: string;
+  category?: string;
 }
 
 // Composant pour afficher le titre avec une éventuelle affiche TMDB
-const TitleWithPoster = ({ poster, originalTitle }: TitleWithPosterProps) => {
+const TitleWithPoster = ({ poster, originalTitle, category }: TitleWithPosterProps) => {
+  const getCategoryIcon = () => {
+    switch (category) {
+      case 'Films': return <Film className="w-6 h-6 text-blue-400" />;
+      case 'Séries TV': return <Tv className="w-6 h-6 text-purple-400" />;
+      case 'Anime': return <MonitorPlay className="w-6 h-6 text-pink-400" />;
+      case 'Documentaires': return <Clapperboard className="w-6 h-6 text-green-400" />;
+      case 'Musique': return <Music className="w-6 h-6 text-yellow-400" />;
+      case 'Livres': return <Book className="w-6 h-6 text-orange-400" />;
+      default: return <Folder className="w-6 h-6 text-gray-400" />;
+    }
+  };
+
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-4">
       {poster ? (
         <img 
           src={poster} 
           alt="Affiche" 
-          className="w-12 h-16 object-cover rounded-md shadow-md" 
+          className="w-12 h-16 object-cover rounded-xl shadow-[0_4px_20px_rgba(0,0,0,0.5)] border border-white/10 shrink-0" 
           loading="lazy"
         />
       ) : (
-        <div className="w-12 h-16 bg-gray-700 rounded-md flex items-center justify-center text-gray-500">
-          <span>?</span>
+        <div className="w-12 h-16 bg-white/5 border border-white/10 rounded-xl flex items-center justify-center shadow-inner relative overflow-hidden shrink-0">
+          <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-50" />
+          {getCategoryIcon()}
         </div>
       )}
-      <h3 className="font-medium break-words text-white">
+      <h3 className="font-bold text-white text-sm md:text-base leading-tight line-clamp-2">
         {originalTitle}
       </h3>
     </div>
@@ -168,6 +185,14 @@ export function RssFeedList() {
   const [showToast, setShowToast] = useState(false);
   const [selectedFeed, setSelectedFeed] = useState<string>('all');
   const queryClient = useQueryClient();
+
+  const { download, confirmModal } = useInteractiveTorrentDownload({
+    onSuccess: () => {
+      setError(null);
+      setShowToast(true);
+    },
+    onError: (msg) => setError(msg),
+  });
 
   const { data: feeds = [], isLoading: isLoadingFeeds, refetch: refetchFeeds } = useQuery({
     queryKey: ['rss-feeds', token],
@@ -182,27 +207,13 @@ export function RssFeedList() {
     refetchOnReconnect: false
   });
 
-  const { data: feedItems = {}, isLoading: isLoadingItems, refetch: refetchItems } = useQuery({
+  const { data: feedItems = {}, isLoading: isLoadingItems } = useQuery({
     queryKey: ['rss-items', token],
     queryFn: async () => {
-      if (!token || feeds.length === 0) return {};
-      
-      const itemsByFeed: { [feedId: string]: RssItem[] } = {};
-
-      for (const feed of feeds) {
-        try {
-          // Passer le feed complet pour avoir feed_name
-          const feedItems = await fetchFeedItems(feed, token);
-          itemsByFeed[feed.id] = feedItems;
-        } catch (err) {
-          setError(`Erreur lors du chargement des éléments RSS pour ${feed.feed_name}`);
-          // Continue avec le prochain flux malgré l'erreur
-        }
-      }
-
-      return itemsByFeed;
+      if (!token) return {};
+      return fetchAllRssItems(token);
     },
-    enabled: !!token && feeds.length > 0,
+    enabled: !!token && !!user?.id,
     staleTime: Infinity,
     gcTime: Infinity,
     refetchOnWindowFocus: false,
@@ -214,14 +225,11 @@ export function RssFeedList() {
 
   const handleRefresh = async () => {
     try {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['rss-feeds', token] }),
-        queryClient.invalidateQueries({ queryKey: ['rss-items', token] })
-      ]);
-      const refreshedFeeds = await refetchFeeds();
-      if (refreshedFeeds.data && refreshedFeeds.data.length > 0) {
-        await refetchItems();
-      }
+      if (!token) return;
+      const refreshed = await fetchAllRssItems(token, true);
+      queryClient.setQueryData(['rss-items', token], refreshed);
+      await refetchFeeds();
+      setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur lors du rafraîchissement');
     }
@@ -245,19 +253,14 @@ export function RssFeedList() {
   };
 
   const handleDownload = async (item: RssItem, currentCategory?: string) => {
-    if (!item.link) {
-      // Afficher une notification d'erreur à l'utilisateur ici
-    } else {
-      try {
-        // Utiliser la catégorie courante au lieu de item.category si elle est fournie
-        const categoryToUse = currentCategory || getCategory(item);
-        
-        await api.addTorrentWithCategory(item.link, categoryToUse, item.tmdbType);
-        setShowToast(true);
-      } catch (error) {
-        setError('Erreur lors de l\'ajout du torrent à qBittorrent');
-      }
-    }
+    if (!item.link) return;
+    const categoryToUse = currentCategory || getCategory(item);
+    await download({
+      url: item.link,
+      name: item.title,
+      itemCategory: categoryToUse,
+      mediaType: item.tmdbType,
+    });
   };
 
   useEffect(() => {
@@ -334,38 +337,39 @@ export function RssFeedList() {
   
   // Fonction pour obtenir la classe CSS du conteneur principal des catégories
   const getContainerClassName = (): string => {
-    return "space-y-4 mt-4";
+    return "space-y-6 mt-8";
   };
   
   // Fonction pour obtenir la classe CSS des éléments individuels
   const getItemClassName = (): string => {
-    return "flex flex-col md:flex-row justify-between items-start gap-4 p-3 bg-gray-700/30 rounded-lg hover:bg-gray-700/50 transition-colors";
+    return "flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 p-4 hover:bg-white/[0.02] transition-all border-b border-white/5 last:border-0 group";
   };
 
   return (
-    <div className="space-y-6 p-4"> {/* Ajout padding global */}
+    <div className="space-y-6">
       {showToast && (
-        <div className="fixed bottom-4 right-4 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg animate-fade-in">
-          Torrent ajouté à qBittorrent!
+        <div className="fixed bottom-4 right-4 bg-green-500/20 text-green-400 border border-green-500/20 px-6 py-3 rounded-2xl shadow-2xl shadow-green-500/10 font-black tracking-widest uppercase text-xs animate-fade-in z-50 backdrop-blur-md">
+          Transfert initié
         </div>
       )}
       {error && (
-        <div className="fixed bottom-4 left-4 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg animate-fade-in">
+        <div className="fixed bottom-4 left-4 bg-red-500/20 text-red-400 border border-red-500/20 px-6 py-3 rounded-2xl shadow-2xl shadow-red-500/10 font-black tracking-widest uppercase text-xs animate-fade-in z-50 backdrop-blur-md">
           {error}
         </div>
       )}
+      {confirmModal}
 
       {/* Barre de contrôles */}
-      <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-center gap-4 p-4 bg-gray-800 rounded-lg shadow">
-        <div className="w-full sm:w-auto flex flex-col sm:flex-row items-start sm:items-center gap-2">
-          <label htmlFor="feed-select" className="text-sm font-medium text-gray-300">Flux RSS : Dernier Sortie sur les Trackers</label>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 glass-card border-white/5 shadow-2xl">
+        <div className="w-full sm:w-auto flex items-center gap-3">
+          <Rss className="text-orange-500 h-5 w-5" />
           <select
             id="feed-select"
             value={selectedFeed}
             onChange={(e) => setSelectedFeed(e.target.value)}
-            className="w-full sm:w-auto bg-gray-700 text-white px-3 py-2 rounded-md border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+            className="w-full sm:w-auto bg-black/40 text-white px-4 py-2.5 rounded-xl border border-white/10 focus:outline-none focus:border-blue-500/50 text-xs font-black uppercase tracking-widest appearance-none cursor-pointer"
           >
-            <option value="all">Tous les flux</option>
+            <option value="all">Tous les réseaux</option>
             {feeds.map((feed: RssFeed) => (
               <option key={feed.id} value={feed.id}>
                 {feed.feed_name}
@@ -377,88 +381,102 @@ export function RssFeedList() {
         <button
           onClick={handleRefresh}
           disabled={isLoading}
-          className={`w-full sm:w-auto sm:ml-auto flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+          className={`w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg ${
             isLoading
-              ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-              : 'bg-blue-600 text-white hover:bg-blue-700'
+              ? 'bg-white/5 text-gray-500 border border-white/5 cursor-not-allowed'
+              : 'bg-blue-600/10 text-blue-400 border border-blue-500/20 hover:bg-blue-600/20 hover:scale-[1.02] shadow-blue-500/10'
           }`}
           title="Rafraîchir les flux"
         >
-          <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
-          <span>{isLoading ? 'Rafraîchissement...' : 'Rafraîchir'}</span>
+          <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
+          <span>{isLoading ? 'Synchro...' : 'Rafraîchir'}</span>
         </button>
       </div>
 
       {/* Affichage des catégories */}
       {!isLoading && !hasItemsToShow && (
-           <div className="text-center text-gray-400 py-8">
-               Aucun élément trouvé pour les filtres actuels ou dans les flux.
+           <div className="glass-card py-20 text-center border-white/5">
+               <p className="text-gray-500 font-black uppercase text-xs tracking-widest opacity-50">Aucun signal détecté sur ces fréquences</p>
            </div>
       )}
 
       {hasItemsToShow && (
         <div className={getContainerClassName()}>
           {categories.map((category) => (
-            groupedItems[category].length > 0 && ( // N'affiche la catégorie que si elle contient des éléments
-              <details key={category} className="bg-gray-800/40 rounded-lg overflow-hidden group"> {/* Supprimé 'open' pour replier par défaut */}
-                <summary className="px-4 py-3 font-semibold text-lg text-white cursor-pointer hover:bg-gray-700/50 transition-colors flex justify-between items-center list-none">
-                  <span>{category} ({groupedItems[category].length})</span>
-                   <span className="text-gray-400 group-open:rotate-90 transform transition-transform duration-200">{">"}</span>
+            groupedItems[category].length > 0 && (
+              <details key={category} className="glass-card overflow-hidden group/accordion border-white/5 [&_summary::-webkit-details-marker]:hidden">
+                <summary className="px-6 py-5 font-black text-sm uppercase tracking-widest text-white cursor-pointer hover:bg-white/5 transition-all flex justify-between items-center list-none border-b border-transparent group-open/accordion:border-white/5 group-open/accordion:bg-white/[0.02]">
+                  <div className="flex items-center gap-4">
+                    <span className="bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">{category}</span>
+                    <span className="bg-blue-500/20 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-md text-[10px]">{groupedItems[category].length}</span>
+                  </div>
+                  <ChevronRight size={18} className="text-gray-500 group-open/accordion:rotate-90 transform transition-transform duration-300" />
                 </summary>
-                <div className="p-4 space-y-3 border-t border-gray-700/50">
+                <div className="flex flex-col bg-black/20">
                   {groupedItems[category].map((item, index) => (
                     <div key={`${item.link}-${index}`} className={getItemClassName()}>
-                      <div className="flex-1 min-w-0">
+                      <div className="flex-1 min-w-0 flex flex-col justify-center">
                         <TitleWithPoster
                           poster={item.tmdbPoster ?? null}
                           originalTitle={item.title}
+                          category={category}
                         />
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-400 mt-2">
-                          <span>{formatDate(item.pubDate)}</span>
-                          <span className="text-orange-400">💾 {formatSize(item.size ?? 0)}</span>
-                          <span className="text-purple-400">📰 {item.feedName}</span>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mt-3 ml-0 md:ml-[64px]">
+                          <div className="flex items-center gap-1 px-1.5 py-0.5 bg-white/5 text-gray-400 rounded-md text-[10px] font-black border border-white/10 uppercase tracking-widest">
+                            <CalendarDays size={10} />
+                            {formatDate(item.pubDate)}
+                          </div>
+                          {item.size ? (
+                            <div className="flex items-center gap-1 px-1.5 py-0.5 bg-amber-500/10 text-amber-500 rounded-md text-[10px] font-black border border-amber-500/20 uppercase tracking-widest">
+                              <HardDrive size={10} />
+                              {formatSize(item.size)}
+                            </div>
+                          ) : null}
+                          <div className="flex items-center gap-1 px-1.5 py-0.5 bg-orange-500/10 text-orange-400 rounded-md text-[10px] font-black border border-orange-500/20 uppercase tracking-widest">
+                            <Rss size={10} />
+                            {item.feedName}
+                          </div>
                           {item.torznab_attr?.seeders !== undefined && (
-                            <span className="text-green-500">▲ {item.torznab_attr.seeders}</span>
+                            <div className="flex items-center gap-1 px-1.5 py-0.5 bg-green-500/10 text-green-500 rounded-md text-[10px] font-black border border-green-500/20 uppercase tracking-widest">
+                              <Users size={10} />
+                              {item.torznab_attr.seeders} <span className="opacity-50">S</span>
+                            </div>
                           )}
-                          {item.torznab_attr?.peers !== undefined &&
-                            (item.torznab_attr.peers - (item.torznab_attr.seeders || 0)) > 0 && (
-                              <span className="text-red-500">
-                                ▼ {item.torznab_attr.peers - (item.torznab_attr.seeders || 0)}
-                              </span>
-                            )}
-                          {item.torznab_attr?.grabs !== undefined && (
-                            <span className="text-blue-400">⭐ {item.torznab_attr.grabs}</span>
+                          {item.torznab_attr?.peers !== undefined && (item.torznab_attr.peers - (item.torznab_attr.seeders || 0)) > 0 && (
+                            <div className="flex items-center gap-1 px-1.5 py-0.5 bg-red-500/10 text-red-500 rounded-md text-[10px] font-black border border-red-500/20 uppercase tracking-widest">
+                              <Download size={10} />
+                              {item.torznab_attr.peers - (item.torznab_attr.seeders || 0)} <span className="opacity-50">L</span>
+                            </div>
                           )}
                         </div>
                       </div>
 
-                      <div className="flex flex-row md:flex-col justify-end items-stretch md:items-start gap-2 mt-3 md:mt-0">
+                      <div className="flex items-center gap-3 w-full xl:w-auto mt-4 xl:mt-0 pl-0 md:pl-[64px] xl:pl-0">
                         {Number.isFinite(item.tmdbId) && item.tmdbType ? (
                           <a
                             href={`https://www.themoviedb.org/${item.tmdbType}/${item.tmdbId}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex-1 md:flex-none flex items-center justify-center gap-1 px-3 py-2 md:py-1 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors shrink-0"
+                            className="flex items-center justify-center px-4 py-2.5 text-[10px] font-black uppercase tracking-widest bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-xl transition-all"
                             title="Voir sur TMDB"
                           >
-                            <span>TMDB</span>
+                            TMDB
                           </a>
                         ) : (
-                          <button
-                            disabled
-                            className="flex-1 md:flex-none flex items-center justify-center gap-1 px-3 py-2 md:py-1 text-sm bg-gray-600 text-gray-400 rounded-md cursor-not-allowed shrink-0"
+                          <span
+                            className="flex items-center justify-center px-4 py-2.5 text-[10px] font-black uppercase tracking-widest bg-white/5 border border-white/5 text-gray-600 rounded-xl cursor-not-allowed"
                             title="TMDB non disponible"
                           >
-                            <span>TMDB</span>
-                          </button>
+                            TMDB
+                          </span>
                         )}
 
                         <button
                           onClick={() => handleDownload(item, category)}
-                          className="flex-1 md:flex-none flex items-center justify-center gap-1 px-3 py-2 md:py-1 text-sm bg-blue-500 hover:bg-blue-600 text-white rounded-md transition-colors shrink-0"
+                          className="flex-1 xl:flex-none flex items-center justify-center gap-2 px-6 py-2.5 text-[10px] font-black uppercase tracking-widest premium-gradient text-white rounded-xl shadow-lg shadow-blue-500/20 hover:scale-[1.02] transition-all"
                           title="Télécharger le torrent"
                         >
-                          <Download size={16} />
+                          <Download size={14} />
                           <span>Télécharger</span>
                         </button>
                       </div>
@@ -470,8 +488,6 @@ export function RssFeedList() {
           ))}
         </div>
       )}
-
-       {/* Supprimé: Contrôles de pagination */}
     </div>
   );
 }

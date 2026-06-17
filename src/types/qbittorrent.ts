@@ -15,8 +15,10 @@ export interface Torrent {
     upspeed: number;
     ratio: number;
     added_on: number; // Timestamp Unix de l'ajout
+    completion_on?: number; // Timestamp Unix de la fin
     tracker: string;  // Tracker principal
     category?: string; // Catégorie du torrent (optionnelle)
+    tags?: string; // Tags du torrent (souvent le nom de l'indexeur)
 }
 
 export type TorrentStatus = 'all' | 'downloading' | 'seeding' | 'completed' | 'paused' | 'checking' | 'queued' | 'error' | 'metaDL';

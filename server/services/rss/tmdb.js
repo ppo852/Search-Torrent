@@ -1,8 +1,76 @@
 import fetch from 'node-fetch';
+import logger from '../core/logger.js';
 import { get } from '../core/db.js';
-import { getTMDBCacheByTitle, saveTMDBCache } from './cache.js';
+import { getTMDBCacheByTitle, saveTMDBCache, getTMDBTvShowCache, saveTMDBTvShowCache } from './cache.js';
+import { applyTmdbCategoryOverride, TMDB_ANIMATION_GENRE_ID } from './category.js';
 // Use centralized normalization/parsing from media-inventory
-import { parseTorrentSafe, normalizeTitleForSearch } from '../media-inventory/utils.js';
+import { parseTorrentSafe, cleanMediaTitle } from '../media-inventory/utils.js';
+
+async function getTmdbAccessToken() {
+  const settings = await get("SELECT value FROM app_settings WHERE name = 'tmdb_access_token'");
+  return settings?.value || null;
+}
+
+/**
+ * Détails show TMDB (genres + statut + dates) — cache par tmdb_id, mutualisé RSS + accueil.
+ * @returns {Promise<{ status: string|null, first_air_date: string|null, last_air_date: string|null, is_animation: boolean }|null>}
+ */
+export async function getTvShowDetails(tmdbId, token, cache = new Map()) {
+  if (!Number.isFinite(tmdbId) || !token) return null;
+  if (cache.has(tmdbId)) return cache.get(tmdbId);
+
+  const dbCached = await getTMDBTvShowCache(tmdbId);
+  if (dbCached) {
+    cache.set(tmdbId, dbCached);
+    return dbCached;
+  }
+
+  try {
+    const resp = await fetch(
+      `https://api.themoviedb.org/3/tv/${tmdbId}?language=fr-FR`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${String(token)}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    if (!resp.ok) {
+      cache.set(tmdbId, null);
+      return null;
+    }
+
+    const data = await resp.json();
+    const details = {
+      status: data.status || null,
+      first_air_date: data.first_air_date || null,
+      last_air_date: data.last_air_date || null,
+      is_animation: Array.isArray(data.genres)
+        && data.genres.some((genre) => genre?.id === TMDB_ANIMATION_GENRE_ID),
+    };
+
+    await saveTMDBTvShowCache(tmdbId, details);
+    cache.set(tmdbId, details);
+    return details;
+  } catch (error) {
+    logger.error(`rss/tmdb: erreur tv/${tmdbId}:`, error);
+    cache.set(tmdbId, null);
+    return null;
+  }
+}
+
+function attachTvShowDetails(tmdbData, showDetails) {
+  if (!tmdbData || !showDetails) return tmdbData;
+  return {
+    ...tmdbData,
+    is_animation: showDetails.is_animation,
+    show_status: showDetails.status,
+    show_first_air_date: showDetails.first_air_date,
+    show_last_air_date: showDetails.last_air_date,
+  };
+}
 
 /**
  * Cherche des informations TMDB pour un titre donné
@@ -20,7 +88,7 @@ export async function searchTMDB(title, opts = {}) {
     // Extraire un titre propre et une année avec parse-torrent-name, fallback à normalizeTitleForSearch
     const ptn = await parseTorrentSafe(title);
     const baseTitleRaw = (ptn.ok && ptn.title) ? ptn.title : title;
-    const baseTitle = normalizeTitleForSearch(baseTitleRaw);
+    const baseTitle = cleanMediaTitle(baseTitleRaw);
     const y = (ptn.ok && Number.isInteger(ptn.year) && ptn.year >= 1900 && ptn.year <= 2100) ? ptn.year : null;
     const seToken = /\bS\d{1,2}E\d{1,3}\b/i.test(title) || /\b\d{1,2}x\d{1,3}\b/i.test(title);
     const sToken = /\bS\d{1,2}\b/i.test(title);
@@ -152,7 +220,7 @@ export async function searchTMDB(title, opts = {}) {
     
     return null;
   } catch (error) {
-    console.error('Erreur lors de la recherche TMDB:', error);
+    logger.error('Erreur lors de la recherche TMDB:', error);
     return null;
   }
 }
@@ -199,38 +267,68 @@ function isTMDBRelevantCategory(category) {
  */
 export async function enrichItemsWithTMDB(items) {
   const enrichedItems = [];
-  
+  const tvShowCache = new Map();
+  const tmdbAccessToken = await getTmdbAccessToken();
+
   for (const item of items) {
     try {
       // Vérifier si la catégorie est pertinente pour TMDB
       if (!isTMDBRelevantCategory(item.category)) {
         enrichedItems.push({
           ...item,
-          tmdb: null
+          tmdb: null,
         });
         continue;
       }
-      
+
       const catCombined = [item.category, item.categoryName].filter(Boolean).join(',');
       const tmdbData = await searchTMDB(item.title, { category: catCombined });
-      
-      enrichedItems.push({
+
+      let enrichedItem = {
         ...item,
-        tmdb: tmdbData || null
-      });
+        tmdb: tmdbData || null,
+      };
+
+      if (
+        tmdbData?.media_type === 'tv'
+        && Number.isFinite(tmdbData.tmdb_id)
+        && tmdbAccessToken
+      ) {
+        const showDetails = await getTvShowDetails(
+          tmdbData.tmdb_id,
+          tmdbAccessToken,
+          tvShowCache
+        );
+
+        if (showDetails) {
+          enrichedItem = {
+            ...enrichedItem,
+            tmdb: attachTvShowDetails(enrichedItem.tmdb, showDetails),
+          };
+
+          if (item.categoryName !== 'Anime') {
+            enrichedItem = applyTmdbCategoryOverride(enrichedItem, {
+              isAnimation: showDetails.is_animation,
+            });
+          }
+        }
+      }
+
+      enrichedItems.push(enrichedItem);
     } catch (err) {
-      console.error(`Erreur lors de l'enrichissement TMDB pour ${item.title}:`, err);
+      logger.error(`Erreur lors de l'enrichissement TMDB pour ${item.title}:`, err);
       enrichedItems.push({
         ...item,
-        tmdb: null
+        tmdb: null,
       });
     }
   }
-  
+
   return enrichedItems;
 }
 
 export default {
   searchTMDB,
-  enrichItemsWithTMDB
+  enrichItemsWithTMDB,
+  getTvShowDetails,
 };

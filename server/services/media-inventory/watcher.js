@@ -1,11 +1,13 @@
 import chokidar from 'chokidar';
 import mediaInventoryService from './index.js';
-import { getSetting } from '../settings/index.js';
 import { updateDownloadingEpisodesStatus } from './episode-status.js';
+import userService from '../users/index.js';
 
 let watcher = null;
 let debounceTimer = null;
-let scanIsRunning = false;
+let flushIsRunning = false;
+const pendingAdds = new Set();
+const pendingUnlinks = new Set();
 
 function isDebug() {
   const v = String(process.env.DEBUG_MEDIA_WATCHER || '').toLowerCase();
@@ -45,35 +47,72 @@ function isVideoFilePath(p) {
   );
 }
 
-async function runScanNow() {
-  if (scanIsRunning) return;
-  scanIsRunning = true;
+async function flushPendingChanges() {
+  if (flushIsRunning) return;
+  flushIsRunning = true;
+
+  const unlinks = Array.from(pendingUnlinks);
+  const adds = Array.from(pendingAdds);
+  pendingUnlinks.clear();
+  pendingAdds.clear();
+
   try {
-    const moviesPath = await getSetting('media_movies_path');
-    const seriesPath = await getSetting('media_series_path');
+    for (const filePath of unlinks) {
+      try {
+        await mediaInventoryService.removeFile(filePath);
+        if (isDebug()) {
+          console.log('[MediaWatcher] Fichier retiré de l\'inventaire', { file: filePath });
+        }
+      } catch (err) {
+        console.error(`[MediaWatcher] Erreur suppression inventaire ${filePath}:`, err);
+      }
+    }
 
-    await mediaInventoryService.scanNow({
-      moviesPath: typeof moviesPath === 'string' ? moviesPath : '/media/Films',
-      seriesPath: typeof seriesPath === 'string' ? seriesPath : '/media/series'
-    });
+    for (const filePath of adds) {
+      try {
+        const record = await mediaInventoryService.ingestFile(filePath);
+        if (isDebug()) {
+          console.log('[MediaWatcher] Fichier ajouté à l\'inventaire', {
+            file: filePath,
+            title: record?.title || null,
+          });
+        }
+      } catch (err) {
+        console.error(`[MediaWatcher] Erreur ingestion ${filePath}:`, err);
+      }
+    }
 
-    await updateDownloadingEpisodesStatus();
+    if (unlinks.length > 0 || adds.length > 0) {
+      await updateDownloadingEpisodesStatus();
+    }
   } catch (err) {
-    console.error('[MediaWatcher] Erreur scan déclenché:', err);
+    console.error('[MediaWatcher] Erreur traitement incrémental:', err);
   } finally {
-    scanIsRunning = false;
+    flushIsRunning = false;
   }
 }
 
-function scheduleScan(reason, filePath) {
+function scheduleIncrementalChange(reason, filePath) {
+  if (reason === 'add') {
+    pendingUnlinks.delete(filePath);
+    pendingAdds.add(filePath);
+  } else if (reason === 'unlink') {
+    pendingAdds.delete(filePath);
+    pendingUnlinks.add(filePath);
+  }
+
   const debounceMs = getDebounceMs();
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(async () => {
     debounceTimer = null;
     if (isDebug()) {
-      console.log('[MediaWatcher] Changement détecté, scan déclenché', { reason, file: filePath || null });
+      console.log('[MediaWatcher] Traitement incrémental', {
+        adds: pendingAdds.size,
+        unlinks: pendingUnlinks.size,
+        file: filePath || null,
+      });
     }
-    await runScanNow();
+    await flushPendingChanges();
   }, debounceMs);
 }
 
@@ -87,10 +126,26 @@ export async function startMediaWatcher() {
 
   if (watcher) return;
 
-  const moviesPath = await getSetting('media_movies_path');
-  const seriesPath = await getSetting('media_series_path');
-  const watchPaths = [moviesPath, seriesPath]
-    .filter((v) => typeof v === 'string' && v.trim().length > 0);
+  const pathsToWatch = new Set();
+
+  const addPaths = (val) => {
+    if (typeof val === 'string' && val.trim().length > 0) {
+      val.split(':').map((p) => p.trim()).filter(Boolean).forEach((p) => pathsToWatch.add(p));
+    }
+  };
+
+  try {
+    const users = await userService.getAllUsers();
+    for (const u of users) {
+      addPaths(u.download_path_movies);
+      addPaths(u.download_path_series);
+      addPaths(u.download_path_anime);
+    }
+  } catch (err) {
+    console.error('[MediaWatcher] Failed to fetch user paths:', err);
+  }
+
+  const watchPaths = Array.from(pathsToWatch);
 
   if (watchPaths.length === 0) {
     if (isDebug()) {
@@ -107,21 +162,21 @@ export async function startMediaWatcher() {
     persistent: true,
     awaitWriteFinish: {
       stabilityThreshold: 30000,
-      pollInterval
+      pollInterval,
     },
     usePolling,
     interval: pollInterval,
-    binaryInterval: pollInterval
+    binaryInterval: pollInterval,
   });
 
   watcher.on('add', (p) => {
     if (!isVideoFilePath(p)) return;
-    scheduleScan('add', p);
+    scheduleIncrementalChange('add', p);
   });
 
   watcher.on('unlink', (p) => {
     if (!isVideoFilePath(p)) return;
-    scheduleScan('unlink', p);
+    scheduleIncrementalChange('unlink', p);
   });
 
   watcher.on('error', (err) => {
@@ -129,7 +184,7 @@ export async function startMediaWatcher() {
   });
 
   if (isDebug()) {
-    console.log('[MediaWatcher] Actif', { paths: watchPaths, usePolling, pollInterval, debounceMs: getDebounceMs() });
+    console.log('[MediaWatcher] Actif (incrémental)', { paths: watchPaths, usePolling, pollInterval, debounceMs: getDebounceMs() });
   }
 }
 
@@ -138,6 +193,8 @@ export async function stopMediaWatcher() {
     clearTimeout(debounceTimer);
     debounceTimer = null;
   }
+  pendingAdds.clear();
+  pendingUnlinks.clear();
   if (watcher) {
     try {
       await watcher.close();
@@ -150,5 +207,5 @@ export async function stopMediaWatcher() {
 
 export default {
   startMediaWatcher,
-  stopMediaWatcher
+  stopMediaWatcher,
 };

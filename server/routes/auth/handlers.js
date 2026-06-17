@@ -31,7 +31,6 @@ export async function loginHandler(req, res) {
         is_admin: user.is_admin,
         qbit_url: user.qbit_url,
         qbit_username: user.qbit_username,
-        qbit_password: user.qbit_password ? 'non configuré' : null,
         created_at: user.created_at
       }
     });
@@ -43,9 +42,9 @@ export async function loginHandler(req, res) {
         id: user.id,
         username: user.username,
         is_admin: user.is_admin,
+        allow_force_interactive_download: !!user.allow_force_interactive_download,
         qbit_url: user.qbit_url,
         qbit_username: user.qbit_username,
-        qbit_password: user.qbit_password ? 'non configuré' : null,
         created_at: user.created_at
       }
     });

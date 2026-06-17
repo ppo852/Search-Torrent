@@ -4,6 +4,7 @@
 
 import prowlarrSearchService from '../../services/prowlarr/search.js';
 import { getSetting } from '../../services/settings/index.js';
+import { getResultCompatibility } from '../../services/utils/validation.js';
 
 /**
  * Recherche un film avec variantes de titre et filtrage par pertinence
@@ -39,11 +40,7 @@ export async function searchMovieHandler(req, res) {
  */
 export async function searchTvEpisodeHandler(req, res) {
   try {
-    const { title, seasonNumber, episodeNumber, mediaType } = req.body;
-
-    if (!title || !seasonNumber || !episodeNumber) {
-      return res.status(400).json({ error: 'Titre, numéro de saison et épisode requis' });
-    }
+    const { title, seasonNumber, episodeNumber, mediaType, tmdbId } = req.body;
 
     const minSeedsSetting = await getSetting('min_seeds');
     const minSeeds = typeof minSeedsSetting === 'number' ? minSeedsSetting : 3;
@@ -52,6 +49,7 @@ export async function searchTvEpisodeHandler(req, res) {
       title,
       seasonNumber: Number(seasonNumber),
       episodeNumber: Number(episodeNumber),
+      tmdbId: tmdbId || null,
       mediaType: mediaType || 'tv',
       minSeeds
     });
@@ -68,17 +66,14 @@ export async function searchTvEpisodeHandler(req, res) {
  */
 export async function searchTvSeriesHandler(req, res) {
   try {
-    const { title, mediaType, tmdbId } = req.body;
-
-    if (!title) {
-      return res.status(400).json({ error: 'Titre requis' });
-    }
+    const { title, mediaType, tmdbId, year } = req.body;
 
     const minSeedsSetting = await getSetting('min_seeds');
     const minSeeds = typeof minSeedsSetting === 'number' ? minSeedsSetting : 3;
 
     const results = await prowlarrSearchService.searchTvSeries({
       title,
+      year: year || '',
       tmdbId: tmdbId || null,
       mediaType: mediaType || 'tv',
       minSeeds
@@ -124,8 +119,13 @@ export async function searchGeneralHandler(req, res) {
 
     // For TV/anime, use series search
     if (category === 'tv' || category === 'anime') {
+      const yearMatch = query.match(/\b(19\d{2}|20\d{2})\b/);
+      const year = yearMatch?.[1] || '';
+      const title = query.replace(/\b(19\d{2}|20\d{2})\b/, '').trim();
+
       const results = await prowlarrSearchService.searchTvSeries({
-        title: query,
+        title,
+        year,
         mediaType: category,
         minSeeds
       });
@@ -133,9 +133,9 @@ export async function searchGeneralHandler(req, res) {
       return res.json({ results });
     }
 
-    // General search (all categories)
     const results = await prowlarrSearchService.searchGeneral({
       query,
+      category: category === 'all' ? null : (category || null),
       minSeeds
     });
 

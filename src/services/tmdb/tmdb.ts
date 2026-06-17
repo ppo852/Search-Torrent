@@ -64,14 +64,14 @@ class TmdbAPI {
     if (!globalSettings.getTmdbAccessToken()) {
       return [];
     }
-    
+
     const cleanedTitle = this.cleanTitle(query);
-    
-    
+
+
     try {
       return await this.searchWithTitle(cleanedTitle, query, mediaType);
     } catch (error) {
- 
+
       return [];
     }
   }
@@ -79,56 +79,118 @@ class TmdbAPI {
   async searchWithTitle(query: string, originalQuery: string, mediaType: 'movie' | 'tv' | 'all' = 'all'): Promise<TmdbResult[]> {
     // Determine if likely an anime for better search
     const isAnime = /anime|アニメ/.test(originalQuery.toLowerCase());
-    
+
     // Déterminer quels types de médias rechercher en fonction du paramètre mediaType
     const types: Array<'movie' | 'tv'> = mediaType === 'all' ? ['movie', 'tv'] : [mediaType];
     const results: TmdbResult[] = [];
-    
+
     for (const type of types) {
       try {
         const url = new URL(`${this.BASE_URL}/search/${type}`);
         url.searchParams.append('query', query);
         url.searchParams.append('language', 'fr-FR');
         url.searchParams.append('include_adult', 'false');
-        
+
         // Pour les animes, on ajoute le filtre du genre animation
         if (isAnime) {
           url.searchParams.append('with_genres', '16');
         }
-        
+
         const response = await fetch(url.toString(), {
           headers: this.getHeaders()
         });
-        
+
         if (!response.ok) {
           throw new Error(`TMDB API error: ${response.status}`);
         }
-        
+
         const data = await response.json();
-        
+
         data.results.forEach((item: any) => {
+          // Déterminer le type réel du média (important pour la recherche 'multi')
+          const actualType = type === 'multi' ? item.media_type : type;
+          
+          // On ignore ce qui n'est ni un film ni une série (ex: les fiches d'acteurs)
+          if (actualType !== 'movie' && actualType !== 'tv') return;
+
           results.push({
             id: item.id,
-            title: type === 'movie' ? item.title : item.name,
-            originalTitle: type === 'movie' ? item.original_title : item.original_name,
-            releaseDate: type === 'movie' ? item.release_date : item.first_air_date,
+            title: actualType === 'movie' ? item.title : item.name,
+            originalTitle: actualType === 'movie' ? item.original_title : item.original_name,
+            releaseDate: actualType === 'movie' ? item.release_date : item.first_air_date,
             posterPath: item.poster_path ? `https://image.tmdb.org/t/p/w185${item.poster_path}` : null,
-            type: type,
+            type: actualType as 'movie' | 'tv',
             overview: item.overview,
             voteAverage: item.vote_average,
-            genres: item.genre_ids ? item.genre_ids.map((id: number) => ({ id, name: '' })) : [] // Ajouté pour filtrage
+            genres: item.genre_ids ? item.genre_ids.map((id: number) => ({ id, name: '' })) : []
           });
         });
       } catch (error) {
-        }
+      }
     }
-    
+
     // Trier par popularité (vote_average)
     return results.sort((a, b) => b.voteAverage - a.voteAverage);
   }
 
   getTmdbUrl(id: number, type: 'movie' | 'tv'): string {
     return `https://www.themoviedb.org/${type}/${id}`;
+  }
+
+  /**
+   * Récupère les détails complets d'un film
+   */
+  async getMovieDetails(id: string | number): Promise<any> {
+    const url = new URL(`${this.BASE_URL}/movie/${id}`);
+    url.searchParams.append('language', 'fr-FR');
+    url.searchParams.append('append_to_response', 'credits,videos,recommendations');
+
+    const response = await fetch(url.toString(), {
+      headers: this.getHeaders()
+    });
+
+    if (!response.ok) {
+      throw new Error(`TMDB error: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Récupère les détails complets d'une série TV
+   */
+  async getTvDetails(id: string | number): Promise<any> {
+    const url = new URL(`${this.BASE_URL}/tv/${id}`);
+    url.searchParams.append('language', 'fr-FR');
+    url.searchParams.append('append_to_response', 'credits,videos,recommendations');
+
+    const response = await fetch(url.toString(), {
+      headers: this.getHeaders()
+    });
+
+    if (!response.ok) {
+      throw new Error(`TMDB error: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Récupère les détails d'une saison spécifique d'une série TV
+   */
+  async getTvSeasonDetails(id: string | number, seasonNumber: number): Promise<any> {
+    const url = new URL(`${this.BASE_URL}/tv/${id}/season/${seasonNumber}`);
+    url.searchParams.append('language', 'fr-FR');
+
+    const response = await fetch(url.toString(), {
+      headers: this.getHeaders()
+    });
+
+    if (!response.ok) {
+      throw new Error(`TMDB error: ${response.status}`);
+    }
+
+    return response.json();
   }
 
   /**

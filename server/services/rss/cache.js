@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { get, run } from '../core/db.js';
-import { normalizeTitleForSearch } from '../media-inventory/utils.js';
+import logger from '../core/logger.js';
+import { cleanMediaTitle } from '../media-inventory/utils.js';
 
 /**
  * Récupère les données du cache RSS
@@ -23,7 +24,7 @@ export async function getRSSCache(feedId, feedUrl, includeExpired = false) {
   try {
     return await get(sql, params);
   } catch (err) {
-    console.error('Erreur lors de la récupération du cache RSS:', err);
+    logger.error('Erreur lors de la récupération du cache RSS:', err);
     throw err;
   }
 }
@@ -45,8 +46,10 @@ export async function saveRSSCache(feedId, feedUrl, itemsJson, itemsWithTMDB, op
   // Si expiresAt n'est pas fourni, définir par défaut à 30 minutes dans le futur
   const cacheDurationMinutes = options.cacheDurationMinutes || 30;
   const expiresAt = options.expiresAt || new Date(now.getTime() + cacheDurationMinutes * 60000).toISOString();
-  
+
   try {
+    await run('DELETE FROM rss_items_cache WHERE feed_url = ?', [feedUrl]);
+
     const sql = `INSERT INTO rss_items_cache (
       id, feed_id, feed_url, items_json, items_with_tmdb_json, tmdb_updated_at, last_updated, expires_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
@@ -64,7 +67,7 @@ export async function saveRSSCache(feedId, feedUrl, itemsJson, itemsWithTMDB, op
     
     await run(sql, params);
   } catch (err) {
-    console.error('Erreur lors de l\'enregistrement du cache RSS:', err);
+    logger.error('Erreur lors de l\'enregistrement du cache RSS:', err);
     throw err;
   }
 }
@@ -83,7 +86,7 @@ export async function updateRSSCacheWithTMDB(feedId, enrichedItems) {
     const sql = 'UPDATE rss_items_cache SET items_with_tmdb_json = ?, tmdb_updated_at = ? WHERE feed_id = ? ORDER BY last_updated DESC LIMIT 1';
     await run(sql, [itemsWithTMDBJson, now, feedId]);
   } catch (err) {
-    console.error('Erreur lors de la mise à jour du cache TMDB:', err);
+    logger.error('Erreur lors de la mise à jour du cache TMDB:', err);
     throw err;
   }
 }
@@ -94,7 +97,7 @@ export async function updateRSSCacheWithTMDB(feedId, enrichedItems) {
  * @returns {Promise<Object|null>} Données TMDB ou null si aucune entrée trouvée
  */
 export async function getTMDBCacheByTitle(title) {
-  const normalizedTitle = normalizeTitleForSearch(title);
+  const normalizedTitle = cleanMediaTitle(title);
   
   try {
     const now = new Date().toISOString();
@@ -108,7 +111,7 @@ export async function getTMDBCacheByTitle(title) {
     }
     return null;
   } catch (err) {
-    console.error('Erreur lors de la récupération du cache TMDB:', err);
+    logger.error('Erreur lors de la récupération du cache TMDB:', err);
     throw err;
   }
 }
@@ -121,7 +124,7 @@ export async function getTMDBCacheByTitle(title) {
  */
 export async function saveTMDBCache(title, tmdbData) {
   const id = randomUUID();
-  const normalizedTitle = normalizeTitleForSearch(title);
+  const normalizedTitle = cleanMediaTitle(title);
   const now = new Date().toISOString();
   
   // Cache TMDB valide 7 jours (les données ne changent pas souvent)
@@ -134,8 +137,52 @@ export async function saveTMDBCache(title, tmdbData) {
       [id, title, normalizedTitle, JSON.stringify(tmdbData), now, expiresAt.toISOString()]
     );
   } catch (err) {
-    console.error('Erreur lors de l\'enregistrement du cache TMDB:', err);
+    logger.error('Erreur lors de l\'enregistrement du cache TMDB:', err);
     throw err;
+  }
+}
+
+const TV_SHOW_CACHE_DAYS = 7;
+
+/**
+ * Récupère les détails show TMDB depuis le cache persistant (par tmdb_id).
+ */
+export async function getTMDBTvShowCache(tmdbId) {
+  if (!Number.isFinite(tmdbId)) return null;
+
+  try {
+    const now = new Date().toISOString();
+    const row = await get(
+      'SELECT show_data FROM tmdb_tv_show_cache WHERE tmdb_id = ? AND expires_at > ? LIMIT 1',
+      [tmdbId, now]
+    );
+    if (!row?.show_data) return null;
+    return JSON.parse(row.show_data);
+  } catch (err) {
+    logger.error('Erreur lors de la récupération du cache TMDB tv show:', err);
+    return null;
+  }
+}
+
+/**
+ * Sauvegarde les détails show TMDB (genres, statut, dates) par tmdb_id.
+ */
+export async function saveTMDBTvShowCache(tmdbId, showData) {
+  if (!Number.isFinite(tmdbId) || !showData) return;
+
+  const now = new Date();
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + TV_SHOW_CACHE_DAYS);
+
+  try {
+    await run('DELETE FROM tmdb_tv_show_cache WHERE tmdb_id = ?', [tmdbId]);
+    await run(
+      `INSERT INTO tmdb_tv_show_cache (tmdb_id, show_data, last_updated, expires_at)
+       VALUES (?, ?, ?, ?)`,
+      [tmdbId, JSON.stringify(showData), now.toISOString(), expiresAt.toISOString()]
+    );
+  } catch (err) {
+    logger.error('Erreur lors de l\'enregistrement du cache TMDB tv show:', err);
   }
 }
 
@@ -144,5 +191,7 @@ export default {
   saveRSSCache,
   updateRSSCacheWithTMDB,
   getTMDBCacheByTitle,
-  saveTMDBCache
+  saveTMDBCache,
+  getTMDBTvShowCache,
+  saveTMDBTvShowCache,
 };

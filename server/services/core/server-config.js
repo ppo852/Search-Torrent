@@ -5,11 +5,14 @@
 
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import { rateLimit } from 'express-rate-limit';
 import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import fileUpload from 'express-fileupload';
-import sqlite3 from 'sqlite3';
+import config from './config.js';
+import db from './db.js';
 
 // Import des routes
 import rssRoutes from '../../routes/rss/index.js';
@@ -21,6 +24,7 @@ import libraryRoutes from '../../routes/library/index.js';
 import mediaInventoryRoutes from '../../routes/media-inventory/index.js';
 import tmdbRoutes from '../../routes/tmdb/index.js';
 import prowlarrRoutes from '../../routes/prowlarr/index.js';
+import systemRoutes from '../../routes/system/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -35,21 +39,38 @@ export function configureServer() {
   
   // Variables d'environnement
   const port = process.env.PORT || 3001;
-  const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
   const isDevelopment = process.env.NODE_ENV !== 'production';
+
+  // Sécurité : Helmet configure divers en-têtes HTTP sécurisés
+  app.use(helmet({
+    contentSecurityPolicy: false, // Désactivé car SPA avec ressources externes (TMDB, etc.)
+    crossOriginEmbedderPolicy: false
+  }));
   
   // Configuration des middlewares
   app.use(cors());
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
+
+  // Limitation du débit (Rate Limiting) pour éviter le brute force
+  const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 20, // Limite à 20 tentatives par fenêtre de 15 minutes
+    message: { error: 'Trop de tentatives de connexion, veuillez réessayer plus tard.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  // Appliquer le limiteur spécifiquement sur le login
+  app.use('/api/auth/login', loginLimiter);
+  app.use('/api/login', loginLimiter); // Ancien endpoint
+
   app.use(fileUpload({
     limits: { fileSize: 50 * 1024 * 1024 }, // Limite à 50MB
     abortOnLimit: true
   }));
   
   // Configuration de la base de données
-  const dbPath = join(dirname(dirname(dirname(__dirname))), 'data/database.sqlite');
-  const db = new sqlite3.Database(dbPath);
   app.locals.db = db;  // Rendre la db accessible aux routes
   
   // Montage des routes API
@@ -62,6 +83,7 @@ export function configureServer() {
   app.use('/api/media-inventory', mediaInventoryRoutes);
   app.use('/api/tmdb', tmdbRoutes);
   app.use('/api/prowlarr', prowlarrRoutes);
+  app.use('/api/system', systemRoutes);
   
   // Route de compatibilité pour maintenir l'ancien endpoint de login
   app.post('/api/login', (req, res) => {
@@ -103,7 +125,7 @@ export function configureServer() {
   return {
     app,
     port,
-    JWT_SECRET,
+    JWT_SECRET: config.auth.jwtSecret,
     isDevelopment,
     db
   };

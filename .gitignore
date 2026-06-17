@@ -39,11 +39,13 @@ dist-ssr
 # Production build
 /build
 
-# Package manager files
-package-lock.json
-yarn.lock
-
 # Cache directories
 .cache
 .npm
 .eslintcache
+
+# Development files
+TASKS.md
+docker-compose.dev.yml
+.gemini/
+data/

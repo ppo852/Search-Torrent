@@ -7,12 +7,23 @@ import { AdminPage } from './pages/AdminPage';
 import { HomePage } from './pages/HomePage';
 import { NewTorrentPage } from './pages/NewTorrentPage';
 import { QBittorrentPage } from './pages/QBittorrentPage';
-import { AddTorrentPage } from './pages/AddTorrentPage';
 import { MediaDetailPage } from './pages/MediaDetailPage';
 import { LibraryPage } from './pages/LibraryPage';
 import { RequestDetailPage } from './pages/RequestDetailPage';
 import { TvShowRequestPage } from './pages/TvShowRequestPage';
-import { Header } from './components/core/Header';
+import { Layout } from './components/core/Layout';
+
+// Intercepteur global pour rediriger vers le login si la session a expiré (HTTP 401)
+const originalFetch = window.fetch;
+window.fetch = async (...args) => {
+  const response = await originalFetch(...args);
+  if (response.status === 401 && !window.location.pathname.includes('/login')) {
+    console.warn('Session expirée (HTTP 401). Déconnexion...');
+    useAuthStore.getState().logout();
+    window.location.href = '/login';
+  }
+  return response;
+};
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -48,9 +59,8 @@ export function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <Router>
-        <div className="min-h-screen bg-gray-900 text-gray-100">
-          {token && <Header />}
+      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <Layout>
           <Routes>
             <Route
               path="/login"
@@ -99,14 +109,6 @@ export function App() {
               }
             />
             <Route
-              path="/add-torrent"
-              element={
-                <PrivateRoute>
-                  <AddTorrentPage />
-                </PrivateRoute>
-              }
-            />
-            <Route
               path="/library"
               element={
                 <PrivateRoute>
@@ -131,7 +133,7 @@ export function App() {
               }
             />
           </Routes>
-        </div>
+        </Layout>
       </Router>
     </QueryClientProvider>
   );

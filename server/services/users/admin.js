@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { randomUUID } from 'crypto';
 import db, { get, run } from '../core/db.js';
 import config from '../core/config.js';
+import logger from '../core/logger.js';
 
 /**
  * Vérifie si le compte administrateur existe déjà
@@ -14,7 +15,7 @@ export async function adminExists() {
     const row = await get("SELECT * FROM users WHERE username = ?", [config.auth.adminUsername]);
     return !!row;
   } catch (error) {
-    console.error('Erreur lors de la vérification du compte admin:', error);
+    logger.error('Erreur lors de la vérification du compte admin:', error);
     return false;
   }
 }
@@ -25,11 +26,11 @@ export async function adminExists() {
  */
 export async function createAdminUser() {
   try {
-    console.log('Création du compte administrateur...');
+    logger.info('Création du compte administrateur...');
     
     const exists = await adminExists();
     if (exists) {
-      console.log('Le compte administrateur existe déjà.');
+      logger.info('Le compte administrateur existe déjà.');
       return null;
     }
     
@@ -53,7 +54,7 @@ export async function createAdminUser() {
     const result = await run(query, params);
     
     if (result && result.changes > 0) {
-      console.log('Compte administrateur créé avec succès');
+      logger.info('Compte administrateur créé avec succès');
       return {
         id: userId,
         username: config.auth.adminUsername || 'admin',
@@ -61,11 +62,11 @@ export async function createAdminUser() {
         created_at: now
       };
     } else {
-      console.error('Erreur lors de la création du compte admin: aucune ligne insérée');
+      logger.error('Erreur lors de la création du compte admin: aucune ligne insérée');
       return null;
     }
   } catch (error) {
-    console.error('Erreur lors de la création du compte admin:', error);
+    logger.error('Erreur lors de la création du compte admin:', error);
     return null;
   }
 }
@@ -81,7 +82,7 @@ export async function initializeAdmin() {
       await createAdminUser();
     }
   } catch (error) {
-    console.error('Erreur lors de l\'initialisation du compte admin:', error);
+    logger.error('Erreur lors de l\'initialisation du compte admin:', error);
   }
 }
 

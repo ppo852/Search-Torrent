@@ -14,7 +14,3 @@ export { default as tmdbService } from './tmdb';
 // Import et re-export des services de paramètres
 export * from './settings';
 export { default as settingsService } from './settings';
-
-// Import et re-export des services de base de données
-export * from './database';
-export { default as databaseService, db } from './database';

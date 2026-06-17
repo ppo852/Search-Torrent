@@ -1,8 +1,10 @@
 import { randomUUID } from 'crypto';
 import rssService from '../../services/rss/index.js';
 import cacheService from '../../services/core/cache.js';
+import rssCache from '../../services/rss/cache.js';
+import { deleteAppCacheByPrefix } from '../../services/core/app-cache.js';
 import * as db from '../../services/core/db.js';
-import * as rssCache from '../../services/rss/cache.js';
+import { getRecentForHome } from '../../services/rss/recent-for-home.js';
 
 /**
  * Récupère tous les flux RSS
@@ -16,6 +18,58 @@ export async function getAllFeeds(req, res) {
   } catch (error) {
     console.error('Erreur lors de la récupération des flux RSS:', error);
     res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+/**
+ * Récupère les items de tous les flux RSS en un seul appel (cache serveur).
+ */
+export async function getAllRssItems(req, res) {
+  try {
+    const forceRefresh = req.query.force_refresh === 'true';
+    const feeds = await db.query('SELECT * FROM global_rss_feeds ORDER BY created_at DESC');
+
+    if (!feeds?.length) {
+      return res.json({
+        itemsByFeed: {},
+        tmdbAvailable: false,
+        fromExpiredCache: false,
+      });
+    }
+
+    const itemsByFeed = {};
+    let tmdbAvailable = false;
+    let fromExpiredCache = false;
+
+    for (const feed of feeds) {
+      try {
+        const result = await rssService.fetchRSSFeedWithCache(feed.id, feed.feed_url, {
+          forceRefresh,
+          includeTMDB: true,
+          invalidateHomeCache: false,
+        });
+
+        itemsByFeed[feed.id] = (result.items || []).map((item) => ({
+          ...item,
+          feedName: feed.feed_name,
+        }));
+
+        if (result.tmdbAvailable) tmdbAvailable = true;
+        if (result.fromExpiredCache) fromExpiredCache = true;
+      } catch (error) {
+        console.error(`Erreur flux RSS ${feed.feed_name}:`, error);
+        itemsByFeed[feed.id] = [];
+      }
+    }
+
+    if (forceRefresh) {
+      await deleteAppCacheByPrefix('recent-home:');
+    }
+
+    res.json({ itemsByFeed, tmdbAvailable, fromExpiredCache });
+  } catch (error) {
+    console.error('Erreur lors de la récupération des items RSS:', error);
+    res.status(500).json({ error: 'Erreur lors de la récupération des items RSS' });
   }
 }
 
@@ -166,30 +220,49 @@ export async function manageCache(req, res) {
  */
 export async function getCacheStats(req, res) {
   try {
-    // Obtenir d'abord les statistiques générales de cache
-    const generalStats = await cacheService.getCacheStats();
-    
-    // Récupérer tous les flux 
+    const summary = await cacheService.getCacheStats();
     const feeds = await db.query('SELECT * FROM global_rss_feeds ORDER BY created_at DESC');
-    
-    // Ajouter les informations de cache générales à chaque feed
-    const feedsWithCache = feeds.map(feed => {
-      return {
-        ...feed,
-        cache: {
-          // Infos de base pour chaque feed
-          lastUpdate: feed.last_updated || null,
-          // Statistiques générales de cache RSS
-          rssStats: generalStats.rss || {}
-        }
-      };
-    });
-    
-    // Renvoyer le tableau de feeds avec infos de cache
-    res.json(feedsWithCache);
+    const now = new Date().toISOString();
+
+    const feedsWithCache = await Promise.all(feeds.map(async (feed) => {
+      const cached = await rssCache.getRSSCache(feed.id, feed.feed_url, true);
+      let cache = null;
+
+      if (cached) {
+        cache = {
+          lastUpdated: cached.last_updated,
+          expiresAt: cached.expires_at,
+          isFresh: cached.expires_at > now,
+        };
+      }
+
+      return { ...feed, cache };
+    }));
+
+    res.json({ summary, feeds: feedsWithCache });
   } catch (err) {
     console.error('Erreur lors de la récupération des statistiques de cache:', err);
     res.status(500).json({ error: 'Erreur lors de la récupération des statistiques de cache' });
+  }
+}
+
+/**
+ * Médias récents des trackers pour la page d'accueil (films, séries, anime)
+ * @param {Object} req - Requête Express
+ * @param {Object} res - Réponse Express
+ */
+export async function getRecentHome(req, res) {
+  try {
+    const parsedHours = parseInt(req.query.hours, 10);
+    const hours = Number.isFinite(parsedHours)
+      ? Math.min(168, Math.max(1, parsedHours))
+      : 72;
+
+    const result = await getRecentForHome({ hours });
+    res.json(result);
+  } catch (error) {
+    console.error('Erreur lors de la récupération des médias récents pour l\'accueil:', error);
+    res.status(500).json({ error: 'Erreur lors de la récupération des médias récents' });
   }
 }
 

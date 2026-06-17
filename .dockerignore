@@ -3,6 +3,10 @@ dist
 .git
 .gitignore
 README.md
+TASKS.md
 .env
 .env.*
 *.log
+data
+screenshots
+.gemini

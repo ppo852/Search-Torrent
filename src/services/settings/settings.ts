@@ -9,6 +9,7 @@ interface GlobalSettings {
   auto_search_interval_minutes: number;
   media_movies_path: string;
   media_series_path: string;
+  media_anime_path: string;
   media_scan_interval_minutes: number;
   media_requests_auto_delete_completed_after_hours: number;
 }
@@ -22,6 +23,7 @@ class GlobalSettingsManager {
     auto_search_interval_minutes: 60,
     media_movies_path: '/media/Films',
     media_series_path: '/media/series',
+    media_anime_path: '/media/Anime',
     media_scan_interval_minutes: 30,
     media_requests_auto_delete_completed_after_hours: 24
   };
@@ -74,6 +76,7 @@ class GlobalSettingsManager {
         auto_search_interval_minutes: settings.auto_search_interval_minutes,
         media_movies_path: settings.media_movies_path,
         media_series_path: settings.media_series_path,
+        media_anime_path: settings.media_anime_path,
         media_scan_interval_minutes: settings.media_scan_interval_minutes,
         media_requests_auto_delete_completed_after_hours: settings.media_requests_auto_delete_completed_after_hours
       });

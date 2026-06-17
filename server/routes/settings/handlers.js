@@ -12,6 +12,7 @@ const ADMIN_ONLY_SETTINGS = [
   'auto_search_interval_minutes',
   'media_movies_path',
   'media_series_path',
+  'media_anime_path',
   'media_scan_interval_minutes',
   'media_requests_auto_delete_completed_after_hours'
 ];
@@ -68,7 +69,7 @@ export async function getGlobalSettingsHandler(req, res) {
   try {
     // Récupérer les paramètres nécessaires
     const result = {};
-    
+
     // Récupérer chaque paramètre individuellement
     for (const settingName of ALL_SETTINGS) {
       const value = await settingsService.getSetting(settingName);
@@ -76,7 +77,7 @@ export async function getGlobalSettingsHandler(req, res) {
         result[settingName] = value;
       }
     }
-    
+
     res.json(result);
   } catch (error) {
     console.error('Erreur lors de la récupération des paramètres globaux:', error);
@@ -93,7 +94,7 @@ export async function getPublicSettingsHandler(req, res) {
   try {
     // Récupérer uniquement les paramètres publics
     const result = {};
-    
+
     // Récupérer chaque paramètre public individuellement
     for (const settingName of PUBLIC_SETTINGS) {
       const value = await settingsService.getSetting(settingName);
@@ -101,7 +102,7 @@ export async function getPublicSettingsHandler(req, res) {
         result[settingName] = value;
       }
     }
-    
+
     res.json(result);
   } catch (error) {
     console.error('Erreur lors de la récupération des paramètres publics:', error);
@@ -116,18 +117,18 @@ export async function getPublicSettingsHandler(req, res) {
  */
 export async function getSettingHandler(req, res) {
   const { name } = req.params;
-  
+
   if (!name) {
     return res.status(400).json({ error: 'Le nom du paramètre est requis' });
   }
-  
+
   try {
     const value = await settingsService.getSetting(name);
-    
+
     if (value === null) {
       return res.status(404).json({ error: `Le paramètre '${name}' n'a pas été trouvé` });
     }
-    
+
     res.json({ name, value });
   } catch (error) {
     console.error(`Erreur lors de la récupération du paramètre ${name}:`, error);
@@ -143,15 +144,15 @@ export async function getSettingHandler(req, res) {
 export async function saveSettingHandler(req, res) {
   const { name } = req.params;
   const { value } = req.body;
-  
+
   if (!name) {
     return res.status(400).json({ error: 'Le nom du paramètre est requis' });
   }
-  
+
   if (value === undefined) {
     return res.status(400).json({ error: 'La valeur du paramètre est requise' });
   }
-  
+
   try {
     await settingsService.saveSetting(name, value);
     res.json({ success: true, message: `Paramètre '${name}' enregistré avec succès` });
@@ -169,14 +170,14 @@ export async function saveSettingHandler(req, res) {
 export async function updateGlobalSettingsHandler(req, res) {
   try {
     const settings = req.body;
-    
+
     // Valider que les paramètres sont bien dans la liste autorisée
     for (const key of Object.keys(settings)) {
       if (!ALL_SETTINGS.includes(key)) {
         return res.status(400).json({ error: `Le paramètre '${key}' n'est pas valide` });
       }
     }
-    
+
     // Mettre à jour chaque paramètre
     // Validation spécifique: profils qualité
     if (Object.prototype.hasOwnProperty.call(settings, 'quality_profiles') || Object.prototype.hasOwnProperty.call(settings, 'quality_profile_assignments')) {
@@ -248,6 +249,13 @@ export async function updateGlobalSettingsHandler(req, res) {
       }
     }
 
+    if (Object.prototype.hasOwnProperty.call(settings, 'media_anime_path')) {
+      const v = settings.media_anime_path;
+      if (typeof v !== 'string') {
+        return res.status(400).json({ error: 'media_anime_path doit être une chaîne' });
+      }
+    }
+
     for (const [key, value] of Object.entries(settings)) {
       if (value !== undefined) {
         await settingsService.saveSetting(key, value);
@@ -265,7 +273,8 @@ export async function updateGlobalSettingsHandler(req, res) {
     if (
       Object.prototype.hasOwnProperty.call(settings, 'media_scan_interval_minutes') ||
       Object.prototype.hasOwnProperty.call(settings, 'media_movies_path') ||
-      Object.prototype.hasOwnProperty.call(settings, 'media_series_path')
+      Object.prototype.hasOwnProperty.call(settings, 'media_series_path') ||
+      Object.prototype.hasOwnProperty.call(settings, 'media_anime_path')
     ) {
       try {
         schedulerService.scheduleMediaInventoryScan(0);
@@ -273,7 +282,7 @@ export async function updateGlobalSettingsHandler(req, res) {
         // ignore
       }
     }
-    
+
     res.json({ success: true, message: 'Paramètres mis à jour avec succès' });
   } catch (error) {
     console.error('Erreur lors de la mise à jour des paramètres globaux:', error);
@@ -288,11 +297,11 @@ export async function updateGlobalSettingsHandler(req, res) {
  */
 export async function deleteSettingHandler(req, res) {
   const { name } = req.params;
-  
+
   if (!name) {
     return res.status(400).json({ error: 'Le nom du paramètre est requis' });
   }
-  
+
   try {
     await settingsService.deleteSetting(name);
     res.json({ success: true, message: `Paramètre '${name}' supprimé avec succès` });

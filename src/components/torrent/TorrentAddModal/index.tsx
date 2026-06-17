@@ -210,10 +210,10 @@ export const TorrentAddModal: React.FC<TorrentAddModalProps> = ({
               >
                 <option value="">Sélectionner une catégorie</option>
                 <option value="Films">Films</option>
-                <option value="Série">Série</option>
-                <option value="anime">anime</option>
+                <option value="Séries">Séries</option>
+                <option value="Anime">Anime</option>
                 <option value="Musique">Musique</option>
-                <option value="Logiciel">Logiciel</option>
+                <option value="Logiciels">Logiciels</option>
                 <option value="Jeux">Jeux</option>
                 <option value="Livres">Livres</option>
                 <option value="Autres">Autres</option>
@@ -222,7 +222,7 @@ export const TorrentAddModal: React.FC<TorrentAddModalProps> = ({
                 {/* Filtrer les catégories dynamiques pour éviter les doublons */}
                 {categories
                   .filter((category: string) => 
-                    !["Films", "Série", "anime", "Musique", "Logiciel", "Jeux", "Livres", "Autres", "Sport", "Documentaires"]
+                    !["Films", "Séries", "Anime", "Musique", "Logiciels", "Jeux", "Livres", "Autres", "Sport", "Documentaires"]
                     .includes(category)
                   )
                   .map((category: string) => (

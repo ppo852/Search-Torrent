@@ -1,5 +1,6 @@
 // Script d'initialisation de la base de données
 import { run, get, query } from './db.js';
+import logger from './logger.js';
 import bcrypt from 'bcryptjs';
 import { randomUUID } from 'crypto';
 
@@ -18,8 +19,31 @@ export async function initializeDatabase() {
       created_at TEXT,
       qbit_url TEXT,
       qbit_username TEXT,
-      qbit_password TEXT
+      qbit_password TEXT,
+      download_path_movies TEXT,
+      download_path_series TEXT
     )`);
+
+    // Migration : Ajouter les colonnes de chemin de téléchargement si elles n'existent pas
+    const tableInfo = await query("PRAGMA table_info(users)");
+    const columns = tableInfo.map(col => col.name);
+    
+    if (!columns.includes('download_path_movies')) {
+      await run("ALTER TABLE users ADD COLUMN download_path_movies TEXT");
+      logger.info("Migration: Ajout de download_path_movies à la table users");
+    }
+    if (!columns.includes('download_path_series')) {
+      await run("ALTER TABLE users ADD COLUMN download_path_series TEXT");
+      logger.info("Migration: Ajout de download_path_series à la table users");
+    }
+    if (!columns.includes('download_path_anime')) {
+      await run("ALTER TABLE users ADD COLUMN download_path_anime TEXT");
+      logger.info("Migration: Ajout de download_path_anime à la table users");
+    }
+    if (!columns.includes('allow_force_interactive_download')) {
+      await run("ALTER TABLE users ADD COLUMN allow_force_interactive_download INTEGER DEFAULT 0");
+      logger.info("Migration: Ajout de allow_force_interactive_download à la table users");
+    }
 
     // Création de la table settings si elle n'existe pas
     await run(`CREATE TABLE IF NOT EXISTS settings (
@@ -63,6 +87,23 @@ export async function initializeDatabase() {
       title TEXT NOT NULL,
       normalized_title TEXT NOT NULL,
       tmdb_data TEXT NOT NULL,
+      last_updated TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    )`);
+
+    // Cache persistant des détails show TMDB par tmdb_id (genres, statut, dates)
+    await run(`CREATE TABLE IF NOT EXISTS tmdb_tv_show_cache (
+      tmdb_id INTEGER PRIMARY KEY,
+      show_data TEXT NOT NULL,
+      last_updated TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    )`);
+
+    // Cache applicatif générique (accueil trackers, tendances TMDB, etc.)
+    await run(`CREATE TABLE IF NOT EXISTS app_cache (
+      id TEXT PRIMARY KEY,
+      cache_key TEXT NOT NULL UNIQUE,
+      payload_json TEXT NOT NULL,
       last_updated TEXT NOT NULL,
       expires_at TEXT NOT NULL
     )`);
@@ -197,6 +238,8 @@ export async function initializeDatabase() {
     await run(`CREATE INDEX IF NOT EXISTS idx_rss_items_cache_expires_at ON rss_items_cache(expires_at)`);
     await run(`CREATE INDEX IF NOT EXISTS idx_tmdb_cache_normalized_title ON tmdb_cache(normalized_title)`);
     await run(`CREATE INDEX IF NOT EXISTS idx_tmdb_cache_expires_at ON tmdb_cache(expires_at)`);
+    await run(`CREATE INDEX IF NOT EXISTS idx_tmdb_tv_show_cache_expires_at ON tmdb_tv_show_cache(expires_at)`);
+    await run(`CREATE INDEX IF NOT EXISTS idx_app_cache_expires_at ON app_cache(expires_at)`);
     await run(`CREATE INDEX IF NOT EXISTS idx_user_rss_feeds_user_id ON user_rss_feeds(user_id)`);
     await run(`CREATE INDEX IF NOT EXISTS idx_library_items_user_id ON library_items(user_id)`);
     await run(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_library_items_user_tmdb_type ON library_items(user_id, tmdb_id, media_type)`);
@@ -206,6 +249,17 @@ export async function initializeDatabase() {
 
     await run(`CREATE INDEX IF NOT EXISTS idx_tv_season_requests_user_id ON tv_season_requests(user_id)`);
     await run(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_tv_season_requests_tmdb_type_season ON tv_season_requests(tmdb_id, media_type, season_number)`);
+
+    // Dédoublonnage tv_episode_downloads: garder la ligne la plus récente par (demande, épisode)
+    await run(
+      `DELETE FROM tv_episode_downloads
+       WHERE rowid NOT IN (
+         SELECT MAX(rowid)
+         FROM tv_episode_downloads
+         GROUP BY tv_season_request_id, episode_number
+       )`
+    );
+    await run(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_tv_episode_downloads_request_episode ON tv_episode_downloads(tv_season_request_id, episode_number)`);
 
     await run(`CREATE INDEX IF NOT EXISTS idx_tv_season_request_history_request_id ON tv_season_request_history(tv_season_request_id)`);
     await run(`CREATE INDEX IF NOT EXISTS idx_tv_season_request_history_created_at ON tv_season_request_history(created_at)`);
@@ -252,7 +306,7 @@ export async function initializeDatabase() {
     // Initialisation des paramètres app_settings (admin) s'ils n'existent pas
     await initializeDefaultAppSettings();
   } catch (error) {
-    console.error('Erreur lors de l\'initialisation de la base de données:', error);
+    logger.error('Erreur lors de l\'initialisation de la base de données:', error);
     throw error;
   }
 }
@@ -266,6 +320,7 @@ async function initializeDefaultAppSettings() {
     const existingAutoSearchInterval = await get('SELECT value FROM app_settings WHERE name = ?', ['auto_search_interval_minutes']);
     const existingMediaMoviesPath = await get('SELECT value FROM app_settings WHERE name = ?', ['media_movies_path']);
     const existingMediaSeriesPath = await get('SELECT value FROM app_settings WHERE name = ?', ['media_series_path']);
+    const existingMediaAnimePath = await get('SELECT value FROM app_settings WHERE name = ?', ['media_anime_path']);
     const existingMediaScanInterval = await get('SELECT value FROM app_settings WHERE name = ?', ['media_scan_interval_minutes']);
     const existingAutoDeleteCompleted = await get('SELECT value FROM app_settings WHERE name = ?', ['media_requests_auto_delete_completed_after_hours']);
 
@@ -324,14 +379,21 @@ async function initializeDefaultAppSettings() {
     if (!existingMediaMoviesPath) {
       await run(
         'INSERT INTO app_settings (id, name, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-        [randomUUID(), 'media_movies_path', JSON.stringify('/media/Films'), now, now]
+        [randomUUID(), 'media_movies_path', JSON.stringify(''), now, now]
       );
     }
 
     if (!existingMediaSeriesPath) {
       await run(
         'INSERT INTO app_settings (id, name, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-        [randomUUID(), 'media_series_path', JSON.stringify('/media/series'), now, now]
+        [randomUUID(), 'media_series_path', JSON.stringify(''), now, now]
+      );
+    }
+
+    if (!existingMediaAnimePath) {
+      await run(
+        'INSERT INTO app_settings (id, name, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+        [randomUUID(), 'media_anime_path', JSON.stringify(''), now, now]
       );
     }
 
@@ -349,7 +411,7 @@ async function initializeDefaultAppSettings() {
       );
     }
   } catch (error) {
-    console.error('Erreur lors de l\'initialisation des paramètres app_settings:', error);
+    logger.error('Erreur lors de l\'initialisation des paramètres app_settings:', error);
     throw error;
   }
 }
@@ -375,7 +437,7 @@ async function createAdminUserIfNotExists() {
       );
     }
   } catch (error) {
-    console.error('Erreur lors de la création de l\'utilisateur admin:', error);
+    logger.error('Erreur lors de la création de l\'utilisateur admin:', error);
     throw error;
   }
 }
@@ -401,7 +463,7 @@ async function initializeDefaultSettings() {
       }
     }
   } catch (error) {
-    console.error('Erreur lors de l\'initialisation des paramètres par défaut:', error);
+    logger.error('Erreur lors de l\'initialisation des paramètres par défaut:', error);
     throw error;
   }
 }

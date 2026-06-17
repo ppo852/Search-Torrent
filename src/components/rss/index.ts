@@ -4,5 +4,4 @@
  */
 
 export { RssFeedList } from './RssFeedList';
-export { RssFeedManager } from './RssFeedManager';
 export { AdminRssFeedManager } from './AdminRssFeedManager';

@@ -28,6 +28,8 @@ export async function scanMediaInventoryNowHandler(req, res) {
       });
     }
 
+    const { force } = req.body || {};
+
     scanJob = {
       running: true,
       startedAt: Date.now(),
@@ -40,13 +42,13 @@ export async function scanMediaInventoryNowHandler(req, res) {
     // fire-and-forget to avoid HTTP timeouts on large libraries
     (async () => {
       try {
-        const moviesPath = await getSetting('media_movies_path');
-        const seriesPath = await getSetting('media_series_path');
-
-        const result = await mediaInventoryService.scanNow({
-          moviesPath: typeof moviesPath === 'string' ? moviesPath : '/media/Films',
-          seriesPath: typeof seriesPath === 'string' ? seriesPath : '/media/series'
-        });
+        if (force) {
+          const { run } = await import('../../services/core/db.js');
+          await run('DELETE FROM local_media_inventory');
+        }
+        
+        // The scanNow service automatically collects paths from all users
+        const result = await mediaInventoryService.scanNow();
 
         const updatedEpisodes = await updateDownloadingEpisodesStatus();
 

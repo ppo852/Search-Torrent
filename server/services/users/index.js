@@ -2,6 +2,7 @@
 import bcrypt from 'bcryptjs';
 import db, { get, run, query } from '../core/db.js';
 import admin from './admin.js';
+import logger from '../core/logger.js';
 
 /**
  * Vérifie les identifiants d'un utilisateur
@@ -11,55 +12,31 @@ import admin from './admin.js';
  */
 export async function verifyCredentials(username, password) {
   try {
-    console.log(`👤 Tentative de connexion pour: ${username}`);
-    
-    // Utiliser la fonction get importée, pas la méthode de l'objet db
-    const user = await get(
-      `SELECT id, username, password, is_admin, created_at, 
-       qbit_url, qbit_username, qbit_password FROM users WHERE username = ?`,
-      [username]
-    );
-    
+    const user = await get("SELECT * FROM users WHERE username = ?", [username]);
+
     if (!user) {
-      console.log(`❌ Login failed: user not found - ${username}`);
+      logger.warn(`Login failed: user not found - ${username}`);
       return null;
     }
-    
-    // Transformer les champs booléens stockés comme entiers
-    const processedUser = {
-      ...user,
-      is_admin: !!user.is_admin,
-      has_qbit_url: !!user.qbit_url,
-      has_qbit_username: !!user.qbit_username,
-      has_qbit_password: !!user.qbit_password,
-      qbit_url: user.qbit_url || 'non configuré'
-    };
-    
-    console.log('✅ Utilisateur trouvé:', processedUser);
-    
+
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) {
-      console.log(`❌ Login failed: invalid password - ${username}`);
+      logger.warn(`Login failed: invalid password - ${username}`);
       return null;
     }
     
     // Ne pas retourner le mot de passe dans l'objet utilisateur
     const { password: _, ...userWithoutPassword } = user;
     
-    console.log('🔑 Login successful:', {
-      username: user.username,
-      is_admin: !!user.is_admin,
-      qbit_url: user.qbit_url || 'non configuré',
-      qbit_username: user.qbit_username || 'non configuré',
-      qbit_password: user.qbit_password ? '**********' : 'non configuré'
-    });
+    logger.info(`Login successful for user: ${username}`);
     
     return {
       ...userWithoutPassword,
-      is_admin: !!userWithoutPassword.is_admin
+      is_admin: !!userWithoutPassword.is_admin,
+      allow_force_interactive_download: !!userWithoutPassword.allow_force_interactive_download
     };
   } catch (error) {
-    console.error('Erreur lors de la vérification des identifiants:', error);
+    logger.error('Erreur lors de la vérification des identifiants:', error);
     return null;
   }
 }
@@ -74,7 +51,8 @@ export async function getUserById(userId) {
     // Utiliser la fonction get importée, pas la méthode de l'objet db
     const user = await get(
       `SELECT id, username, is_admin, created_at, 
-       qbit_url, qbit_username FROM users WHERE id = ?`,
+       qbit_url, qbit_username, download_path_movies, download_path_series, download_path_anime,
+       allow_force_interactive_download FROM users WHERE id = ?`,
       [userId]
     );
     
@@ -82,11 +60,34 @@ export async function getUserById(userId) {
     
     return {
       ...user,
-      is_admin: !!user.is_admin
+      is_admin: !!user.is_admin,
+      allow_force_interactive_download: !!user.allow_force_interactive_download
     };
   } catch (error) {
-    console.error('Erreur lors de la récupération de l\'utilisateur:', error);
+    logger.error('Erreur lors de la récupération de l\'utilisateur:', error);
     return null;
+  }
+}
+
+/**
+ * Récupère tous les utilisateurs
+ * @returns {Promise<Array>} Liste de tous les utilisateurs
+ */
+export async function getAllUsers() {
+  try {
+    const users = await query(
+      `SELECT id, username, is_admin, created_at, 
+       qbit_url, qbit_username, download_path_movies, download_path_series, download_path_anime,
+       allow_force_interactive_download FROM users`
+    );
+    return (users || []).map(u => ({
+      ...u,
+      is_admin: !!u.is_admin,
+      allow_force_interactive_download: !!u.allow_force_interactive_download
+    }));
+  } catch (error) {
+    logger.error('Erreur lors de la récupération de tous les utilisateurs:', error);
+    return [];
   }
 }
 
@@ -94,5 +95,6 @@ export async function getUserById(userId) {
 export default {
   verifyCredentials,
   getUserById,
+  getAllUsers,
   admin
 };

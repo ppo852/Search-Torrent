@@ -2,26 +2,15 @@
 import userService from '../../services/users/index.js';
 import { randomUUID } from 'crypto';
 import bcrypt from 'bcryptjs';
-import { get, run, query } from '../../services/core/db.js';
+import { get, run } from '../../services/core/db.js';
 
 /**
  * Récupère la liste des utilisateurs
  */
 export async function getUsersHandler(req, res) {
   try {
-    const users = await query(
-      `SELECT id, username, is_admin, created_at, 
-       qbit_url, qbit_username FROM users`,
-      []
-    );
-    
-    // Transformer les booléens pour tous les utilisateurs
-    const processedUsers = users.map(user => ({
-      ...user,
-      is_admin: !!user.is_admin
-    }));
-    
-    res.json(processedUsers);
+    const users = await userService.getAllUsers();
+    res.json(users);
   } catch (error) {
     console.error('Erreur lors de la récupération des utilisateurs:', error);
     res.status(500).json({ error: 'Erreur serveur lors de la récupération des utilisateurs' });
@@ -33,7 +22,7 @@ export async function getUsersHandler(req, res) {
  */
 export async function createUserHandler(req, res) {
   try {
-    const { username, password, is_admin, qbit_url, qbit_username, qbit_password } = req.body;
+    const { username, password, is_admin, qbit_url, qbit_username, qbit_password, download_path_movies, download_path_series, download_path_anime } = req.body;
     
     // Validation basique
     if (!username || !password) {
@@ -55,8 +44,8 @@ export async function createUserHandler(req, res) {
     
     // Insertion dans la base de données
     const result = await run(
-      `INSERT INTO users (id, username, password, is_admin, created_at, qbit_url, qbit_username, qbit_password) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (id, username, password, is_admin, created_at, qbit_url, qbit_username, qbit_password, download_path_movies, download_path_series, download_path_anime) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         userId,
         username,
@@ -65,14 +54,17 @@ export async function createUserHandler(req, res) {
         now,
         qbit_url || null,
         qbit_username || null,
-        qbit_password ? await bcrypt.hash(qbit_password, 10) : null
+        qbit_password || null,
+        download_path_movies || null,
+        download_path_series || null,
+        download_path_anime || null
       ]
     );
     
     if (result && result.changes > 0) {
       // Récupérer l'utilisateur nouvellement créé sans le mot de passe
       const newUser = await get(
-        `SELECT id, username, is_admin, created_at, qbit_url, qbit_username FROM users WHERE id = ?`,
+        `SELECT id, username, is_admin, created_at, qbit_url, qbit_username, download_path_movies, download_path_series, download_path_anime FROM users WHERE id = ?`,
         [userId]
       );
       
@@ -120,7 +112,18 @@ export async function getUserByIdHandler(req, res) {
 export async function updateUserHandler(req, res) {
   try {
     const { id } = req.params;
-    const { username, password, is_admin, qbit_url, qbit_username, qbit_password } = req.body;
+    const { 
+      username, 
+      password, 
+      is_admin, 
+      qbit_url, 
+      qbit_username, 
+      qbit_password,
+      download_path_movies,
+      download_path_series,
+      download_path_anime,
+      allow_force_interactive_download
+    } = req.body;
     
     // Vérifier si l'utilisateur qui fait la requête est admin ou l'utilisateur demandé
     if (!req.user.is_admin && req.user.id !== id) {
@@ -171,14 +174,30 @@ export async function updateUserHandler(req, res) {
       params.push(qbit_username || null);
     }
     
-    // Le mot de passe qBittorrent doit être stocké en texte brut car il est utilisé pour l'authentification API
-    if (qbit_password) {
+    // Le mot de passe qBittorrent : ne mettre à jour que si une nouvelle valeur non vide est fournie
+    if (typeof qbit_password === 'string' && qbit_password.trim() !== '') {
       updateFields.push('qbit_password = ?');
-      params.push(qbit_password); // Stockage en texte brut pour permettre l'authentification qBittorrent
-    } else if (qbit_password === '') {
-      // Si qbit_password est vide, le supprimer
-      updateFields.push('qbit_password = ?');
-      params.push(null);
+      params.push(qbit_password);
+    }
+
+    if (download_path_movies !== undefined) {
+      updateFields.push('download_path_movies = ?');
+      params.push(download_path_movies);
+    }
+
+    if (download_path_series !== undefined) {
+      updateFields.push('download_path_series = ?');
+      params.push(download_path_series);
+    }
+
+    if (download_path_anime !== undefined) {
+      updateFields.push('download_path_anime = ?');
+      params.push(download_path_anime);
+    }
+
+    if (typeof allow_force_interactive_download !== 'undefined' && req.user.is_admin) {
+      updateFields.push('allow_force_interactive_download = ?');
+      params.push(allow_force_interactive_download ? 1 : 0);
     }
     
     // S'il n'y a rien à mettre à jour
@@ -198,13 +217,14 @@ export async function updateUserHandler(req, res) {
     if (result && result.changes > 0) {
       // Récupérer l'utilisateur mis à jour
       const updatedUser = await get(
-        `SELECT id, username, is_admin, created_at, qbit_url, qbit_username FROM users WHERE id = ?`,
+        `SELECT id, username, is_admin, created_at, qbit_url, qbit_username, download_path_movies, download_path_series, download_path_anime, allow_force_interactive_download FROM users WHERE id = ?`,
         [id]
       );
       
       res.json({
         ...updatedUser,
-        is_admin: !!updatedUser.is_admin
+        is_admin: !!updatedUser.is_admin,
+        allow_force_interactive_download: !!updatedUser.allow_force_interactive_download
       });
     } else {
       res.status(500).json({ error: 'Erreur lors de la mise à jour de l\'utilisateur' });

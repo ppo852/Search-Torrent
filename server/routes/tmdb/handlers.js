@@ -1,7 +1,9 @@
 import fetch from 'node-fetch';
 import { getSetting } from '../../services/settings/index.js';
+import { getAppCache, setAppCache } from '../../services/core/app-cache.js';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
+const NEWEST_CACHE_TTL_MINUTES = 60;
 
 const cache = new Map();
 
@@ -69,6 +71,7 @@ function mapTmdbListResult(items, type) {
       originalTitle: originalTitle || title || '',
       releaseDate: releaseDate || '',
       posterPath: item.poster_path ? `https://image.tmdb.org/t/p/w185${item.poster_path}` : null,
+      backdropPath: item.backdrop_path ? `https://image.tmdb.org/t/p/original${item.backdrop_path}` : null,
       type,
       overview: item.overview || '',
       voteAverage: typeof item.vote_average === 'number' ? item.vote_average : 0
@@ -144,6 +147,11 @@ export async function getUpcomingTvHandler(req, res) {
 export async function getNewestMediaHandler(req, res) {
   try {
     const limit = req.query.limit ? Number(req.query.limit) : 40;
+    const cacheKey = `tmdb-newest:${limit}`;
+    const cached = await getAppCache(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
 
     // Fetch movies and TV shows in parallel
     const [moviesData, tvData] = await Promise.all([
@@ -184,7 +192,9 @@ export async function getNewestMediaHandler(req, res) {
       if (i < shows.length) combined.push(shows[i]);
     }
 
-    res.json(combined.slice(0, limit));
+    const result = combined.slice(0, limit);
+    await setAppCache(cacheKey, result, NEWEST_CACHE_TTL_MINUTES);
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : 'Erreur serveur' });
   }

@@ -11,6 +11,8 @@ services:
       - NODE_ENV=production
       - PORT=3001  # Port du backend
       - JWT_SECRET=change_this_to_a_secure_secret
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=admin # Changez-le ici pour le premier démarrage
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80"]
       interval: 30s

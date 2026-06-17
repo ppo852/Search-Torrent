@@ -62,6 +62,43 @@ export function detectCategory(category, title = '') {
   return 'Autres';
 }
 
+/** Genre TMDB Animation — même critère que MediaDetailPage */
+export const TMDB_ANIMATION_GENRE_ID = 16;
+
+const PROTECTED_CATEGORY_NAMES = new Set([
+  'Films',
+  'Documentaire',
+  'Musique',
+  'Logiciels',
+  'Jeux',
+  'Livres',
+  'Sport',
+]);
+
+/**
+ * Affine categoryName après enrichissement TMDB (code tracker conservé en priorité pour Anime/5070).
+ * @param {Object} item - Élément RSS
+ * @param {{ isAnimation?: boolean }} opts
+ * @returns {Object}
+ */
+export function applyTmdbCategoryOverride(item, { isAnimation = false } = {}) {
+  if (!item) return item;
+
+  if (item.categoryName === 'Anime') {
+    return item;
+  }
+
+  if (PROTECTED_CATEGORY_NAMES.has(item.categoryName)) {
+    return item;
+  }
+
+  if (isAnimation) {
+    return { ...item, categoryName: 'Anime' };
+  }
+
+  return item;
+}
+
 /**
  * Détecte la catégorie à partir du titre quand le code de catégorie n'est pas disponible
  * @param {string} title - Titre de l'élément
@@ -118,5 +155,7 @@ function detectCategoryFromTitle(title) {
 }
 
 export default {
-  detectCategory
+  detectCategory,
+  applyTmdbCategoryOverride,
+  TMDB_ANIMATION_GENRE_ID,
 };

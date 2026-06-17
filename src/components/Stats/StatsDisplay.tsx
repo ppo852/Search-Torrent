@@ -1,5 +1,5 @@
 import React from 'react';
-import { HardDrive, Share2, Scale, ArrowDown } from 'lucide-react';
+import { Share2, Scale, ArrowDown } from 'lucide-react';
 import { GlobalStats } from '../../types/qbittorrent';
 import { formatSize } from '../../utils/formatters';
 
@@ -19,37 +19,39 @@ export function StatsDisplay({ stats }: StatsDisplayProps) {
     const ratioFormat = formatRatio(stats.globalRatio);
     
     return (
-        <div className="grid grid-cols-4 gap-4 mb-6">
-            <div className="bg-gray-800 rounded-lg p-4">
-                <div className="flex items-center gap-2 text-gray-400 mb-1">
-                    <ArrowDown className="h-4 w-4" />
-                    <span className="text-xs uppercase">Total téléchargé</span>
+        <div className="grid grid-cols-3 gap-2 lg:gap-4 mb-6">
+            <div className="glass-card p-3 lg:p-4 border-white/5 bg-white/[0.02] flex flex-col justify-center">
+                <div className="flex items-center gap-1 lg:gap-2 text-gray-500 mb-1 lg:mb-2">
+                    <div className="p-1 bg-blue-500/10 rounded-lg text-blue-400">
+                        <ArrowDown size={12} />
+                    </div>
+                    <span className="text-[7px] lg:text-[9px] uppercase font-black tracking-widest leading-tight">Total Down</span>
                 </div>
-                <div className="text-xl font-semibold">{formatSize(stats.totalDownloaded)}</div>
+                <div className="text-xs lg:text-xl font-black text-white tracking-tighter truncate">{formatSize(stats.totalDownloaded)}</div>
             </div>
 
-            <div className="bg-gray-800 rounded-lg p-4">
-                <div className="flex items-center gap-2 text-gray-400 mb-1">
-                    <Share2 className="h-4 w-4" />
-                    <span className="text-xs uppercase">Total partagé</span>
+            <div className="glass-card p-3 lg:p-4 border-white/5 bg-white/[0.02] flex flex-col justify-center">
+                <div className="flex items-center gap-1 lg:gap-2 text-gray-500 mb-1 lg:mb-2">
+                    <div className="p-1 bg-green-500/10 rounded-xl text-green-400">
+                        <Share2 size={12} />
+                    </div>
+                    <span className="text-[7px] lg:text-[9px] uppercase font-black tracking-widest leading-tight">Total Up</span>
                 </div>
-                <div className="text-xl font-semibold">{formatSize(stats.totalUploaded)}</div>
+                <div className="text-xs lg:text-xl font-black text-white tracking-tighter truncate">{formatSize(stats.totalUploaded)}</div>
             </div>
             
-            <div className="bg-gray-800 rounded-lg p-4">
-                <div className="flex items-center gap-2 text-gray-400 mb-1">
-                    <Scale className="h-4 w-4" />
-                    <span className="text-xs uppercase">Ratio global</span>
+            <div className="glass-card p-3 lg:p-4 border-white/5 bg-white/[0.02] relative overflow-hidden group flex flex-col justify-center">
+                <div className="flex items-center gap-1 lg:gap-2 text-gray-400 mb-1 lg:mb-2">
+                    <div className="p-1 bg-violet-500/10 rounded-xl text-violet-400">
+                        <Scale size={12} />
+                    </div>
+                    <span className="text-[7px] lg:text-[9px] uppercase font-black tracking-widest leading-tight">Ratio</span>
                 </div>
-                <div className={`text-xl font-semibold ${ratioFormat.color}`}>{ratioFormat.text}</div>
-            </div>
-            
-            <div className="bg-gray-800 rounded-lg p-4">
-                <div className="flex items-center gap-2 text-gray-400 mb-1">
-                    <HardDrive className="h-4 w-4" />
-                    <span className="text-xs uppercase">Espace restant</span>
+                <div className={`text-xs lg:text-xl font-black tracking-tighter ${ratioFormat.color}`}>
+                    {ratioFormat.text.split(' ')[0]}
+                    <span className="hidden lg:inline text-[9px] ml-1.5 opacity-50 font-medium uppercase tracking-widest">{ratioFormat.text.split(' ')[1]}</span>
                 </div>
-                <div className="text-xl font-semibold">{formatSize(stats.freeSpace)}</div>
+                <div className={`absolute -right-4 -bottom-4 w-12 lg:w-16 h-12 lg:h-16 blur-3xl opacity-10 rounded-full transition-all duration-700 group-hover:opacity-20 ${ratioFormat.color.replace('text-', 'bg-')}`} />
             </div>
         </div>
     );

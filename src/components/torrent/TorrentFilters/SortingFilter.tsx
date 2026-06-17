@@ -25,7 +25,8 @@ export const SortingFilter: React.FC<SortingFilterProps> = ({
     { value: 'upspeed', label: 'Vitesse UP' },
     { value: 'eta', label: 'Temps restant' },
     { value: 'ratio', label: 'Ratio' },
-    { value: 'added_on', label: 'Date d\'ajout' }
+    { value: 'added_on', label: 'Date d\'ajout' },
+    { value: 'tracker', label: 'Indexeur (Tracker)' }
   ];
 
   return (

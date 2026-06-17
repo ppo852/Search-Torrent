@@ -38,48 +38,46 @@ export function TorrentContextMenu({ hash, onAction, state }: TorrentContextMenu
     }
   };
 
-  // Calculer la position du menu
-  const getMenuPosition = () => {
-    if (!buttonRef.current) return { top: 0, left: 0 };
-    const rect = buttonRef.current.getBoundingClientRect();
-    return {
-      top: rect.bottom + window.scrollY + 5,
-      left: rect.left + window.scrollX - 100 // Décalage pour aligner à droite
-    };
-  };
-
   return (
     <div className="relative" ref={menuRef}>
       <button
         ref={buttonRef}
-        onClick={() => setIsOpen(!isOpen)}
-        className="p-1 hover:bg-gray-700 rounded-full"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setIsOpen(!isOpen);
+        }}
+        className={`p-2.5 rounded-xl transition-all active:scale-95 ${isOpen ? 'bg-white/10 text-white' : 'bg-transparent hover:bg-white/5 text-gray-400 hover:text-white'}`}
       >
-        <MoreVertical className="h-4 w-4" />
+        <MoreVertical size={16} />
       </button>
 
       {isOpen && (
         <div 
-          className="fixed w-48 rounded-md shadow-lg bg-gray-800 border border-gray-700"
-          style={{
-            ...getMenuPosition(),
-            zIndex: 99999
-          }}
+          className="absolute right-0 top-full mt-2 w-56 rounded-2xl shadow-[0_20px_40px_rgba(0,0,0,0.5)] bg-gray-900 border border-white/10 z-[9999] overflow-hidden animate-premium-fade"
         >
-          <div className="py-1" role="none">
+          <div className="p-1.5 space-y-0.5" role="none">
             <button
-              className="flex w-full items-center px-4 py-2 text-sm text-gray-300 hover:bg-gray-700"
-              onClick={() => handleAction(() => api.reannounceTrackers(hash))}
+              className="flex w-full items-center px-4 py-3 text-[10px] font-black tracking-widest uppercase rounded-xl text-gray-400 hover:bg-white/5 hover:text-white transition-all group"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleAction(() => api.reannounceTrackers(hash));
+              }}
             >
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Rafraîchir le torrent
+              <RefreshCw size={14} className="mr-3 group-hover:text-blue-400 transition-colors" />
+              Rafraîchir
             </button>
             <button
-              className="flex w-full items-center px-4 py-2 text-sm text-gray-300 hover:bg-gray-700"
-              onClick={() => handleAction(() => api.recheckTorrent(hash))}
+              className="flex w-full items-center px-4 py-3 text-[10px] font-black tracking-widest uppercase rounded-xl text-gray-400 hover:bg-white/5 hover:text-white transition-all group"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleAction(() => api.recheckTorrent(hash));
+              }}
             >
-              <CheckCircle className="h-4 w-4 mr-2" />
-              Vérifier l'intégrité
+              <CheckCircle size={14} className="mr-3 group-hover:text-green-400 transition-colors" />
+              Vérification
             </button>
           </div>
         </div>

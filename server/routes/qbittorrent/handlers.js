@@ -2,6 +2,9 @@
 import { URLSearchParams } from 'url';
 import FormData from 'form-data';
 import qBittorrentService from '../../services/qbittorrent/index.js';
+import { resolveQbitCategory } from '../../services/utils/qbit-categories.js';
+import logger from '../../services/core/logger.js';
+import { checkInteractiveInventoryDuplicate } from '../../services/qbittorrent/inventory-guard.js';
 
 async function getQbitContextForUserId(req, userId) {
   const user = await qBittorrentService.getQBitUserInfo(req.app.locals.db, userId);
@@ -13,7 +16,7 @@ async function getQbitContextForUserId(req, userId) {
   let cookies = '';
 
   if (user.qbit_username && user.qbit_password) {
-    cookies = await qBittorrentService.authenticateQBittorrent(qbitUrl, user.qbit_username, user.qbit_password);
+    cookies = await qBittorrentService.authenticateQBittorrent(qbitUrl, user.qbit_username, user.qbit_password, userId);
   }
 
   return { user, qbitUrl, cookies };
@@ -215,6 +218,27 @@ export async function addTorrentHandler(req, res) {
     let tags = req.body.tags;
     if (!tags && req.body.options && req.body.options.tags) {
       tags = req.body.options.tags;
+    }
+
+    const torrentName = req.body.name || (req.body.options && req.body.options.name);
+    const force = !!(req.body?.force);
+
+    if (category) {
+      category = resolveQbitCategory(category) || category;
+    }
+
+    const inventoryCheck = await checkInteractiveInventoryDuplicate({
+      torrentName,
+      force,
+      userId: req.user.id
+    });
+
+    if (inventoryCheck.blocked) {
+      return res.status(inventoryCheck.status || 409).json({
+        success: false,
+        error: inventoryCheck.error,
+        details: inventoryCheck.details
+      });
     }
 
     // Si on a des fichiers, on utilise l'upload (.torrent)

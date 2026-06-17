@@ -22,7 +22,7 @@ export function authenticateToken(req, res, next) {
     })
     .catch(err => {
       console.error('JWT verification error:', err);
-      return res.status(403).json({ error: 'Token invalide' });
+      return res.status(401).json({ error: 'Token invalide' });
     });
 }
 

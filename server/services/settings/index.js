@@ -1,6 +1,5 @@
-// Services pour la gestion des paramètres de l'application
-import db from '../core/db.js';
 import { get, run, query } from '../core/db.js';
+import logger from '../core/logger.js';
 
 /**
  * Récupère tous les paramètres de l'application
@@ -22,7 +21,7 @@ export async function getAllSettings() {
     });
     return settings;
   } catch (error) {
-    console.error('Erreur lors de la récupération des paramètres:', error);
+    logger.error('Erreur lors de la récupération des paramètres:', error);
     throw error;
   }
 }
@@ -48,7 +47,7 @@ export async function getSetting(name) {
       return row.value;
     }
   } catch (error) {
-    console.error(`Erreur lors de la récupération du paramètre ${name}:`, error);
+    logger.error(`Erreur lors de la récupération du paramètre ${name}:`, error);
     throw error;
   }
 }
@@ -82,7 +81,7 @@ export async function saveSetting(name, value) {
       );
     }
   } catch (error) {
-    console.error(`Erreur lors de l'enregistrement du paramètre ${name}:`, error);
+    logger.error(`Erreur lors de l'enregistrement du paramètre ${name}:`, error);
     throw error;
   }
 }
@@ -96,7 +95,7 @@ export async function deleteSetting(name) {
   try {
     await run('DELETE FROM app_settings WHERE name = ?', [name]);
   } catch (error) {
-    console.error(`Erreur lors de la suppression du paramètre ${name}:`, error);
+    logger.error(`Erreur lors de la suppression du paramètre ${name}:`, error);
     throw error;
   }
 }

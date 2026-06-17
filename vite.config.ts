@@ -15,6 +15,10 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    watch: {
+      usePolling: true,
+      ignored: ['**/data/**', '**/node_modules/**', '**/*.sqlite*'],
+    },
     proxy: {
       '/api': {
         target: process.env.VITE_PROXY_TARGET || 'http://localhost:3001',

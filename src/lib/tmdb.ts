@@ -1,5 +1,4 @@
 /**
- * Réexporte l'API TMDB depuis le répertoire services
+ * Réexporte tmdbAPI depuis le répertoire services
  */
-export * from '../services/tmdb';
-export { default } from '../services/tmdb';
+export * from '../services/tmdb/tmdb';
