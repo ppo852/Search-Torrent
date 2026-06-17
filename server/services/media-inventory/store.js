@@ -2,6 +2,7 @@ import { run } from '../core/db.js';
 
 export async function upsertMany(items) {
   const now = new Date().toISOString();
+<<<<<<< HEAD
   if (!items || items.length === 0) return;
 
   try {
@@ -52,6 +53,41 @@ export async function upsertMany(items) {
   } catch (err) {
     await run('ROLLBACK');
     throw err;
+=======
+
+  for (const item of items || []) {
+    await run(
+      `INSERT INTO local_media_inventory (
+        id, media_kind, title, title_normalized, year, season, episode,
+        path, size, mtime_ms, last_seen_at
+      ) VALUES (
+        COALESCE(?, lower(hex(randomblob(16)))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      )
+      ON CONFLICT(path) DO UPDATE SET
+        media_kind=excluded.media_kind,
+        title=excluded.title,
+        title_normalized=excluded.title_normalized,
+        year=excluded.year,
+        season=excluded.season,
+        episode=excluded.episode,
+        size=excluded.size,
+        mtime_ms=excluded.mtime_ms,
+        last_seen_at=excluded.last_seen_at`,
+      [
+        item.id || null,
+        item.media_kind,
+        item.title || null,
+        item.title_normalized || null,
+        item.year ?? null,
+        item.season ?? null,
+        item.episode ?? null,
+        item.path,
+        item.size ?? null,
+        item.mtime_ms ?? null,
+        now
+      ]
+    );
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   }
 }
 
@@ -92,6 +128,7 @@ export async function deleteMissingPaths(pathsToKeep) {
   }
 }
 
+<<<<<<< HEAD
 export async function getAllRecordsByPath() {
   const { query } = await import('../core/db.js');
   const rows = await query(`SELECT * FROM local_media_inventory`);
@@ -112,4 +149,9 @@ export default {
   deleteMissingPaths,
   getAllRecordsByPath,
   deleteByPath
+=======
+export default {
+  upsertMany,
+  deleteMissingPaths
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 };

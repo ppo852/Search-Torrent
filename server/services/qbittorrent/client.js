@@ -95,6 +95,96 @@ function normalizeMagnet(input) {
   return input;
 }
 
+function isHttpUrl(value) {
+  return typeof value === 'string' && /^https?:\/\//i.test(value);
+}
+
+function looksLikeProwlarrDownloadUrl(value) {
+  if (!isHttpUrl(value)) return false;
+  try {
+    const u = new URL(value);
+    if (u.searchParams.has('apikey')) return true;
+    if (/\/download$/i.test(u.pathname)) return true;
+    if (/\/\d+\/download$/i.test(u.pathname)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveProwlarrDownloadRedirect(url) {
+  // Some indexers/Prowlarr endpoints redirect to magnet: links.
+  // We must NOT follow them with node-fetch, since magnet is not an HTTP scheme.
+  console.log(`[qBit] Résolution lien Prowlarr: ${url.substring(0, 80)}...`);
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      redirect: 'manual',
+      timeout: 15000
+    });
+
+    console.log(`[qBit] Réponse Prowlarr: status=${response.status}`);
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location') || '';
+      console.log(`[qBit] Redirect vers: ${location.substring(0, 80)}...`);
+      if (location.startsWith('magnet:?')) {
+        return { type: 'magnet', value: location };
+      }
+      if (isHttpUrl(location)) {
+        return { type: 'url', value: location };
+      }
+      return null;
+    }
+
+    // If 200 OK, it might be a .torrent file - try to download and send as file
+    if (response.status === 200) {
+      const contentType = response.headers.get('content-type') || '';
+      console.log(`[qBit] Content-Type: ${contentType}`);
+      if (contentType.includes('application/x-bittorrent') || contentType.includes('octet-stream')) {
+        // Return the original URL - qBittorrent should be able to fetch it
+        return { type: 'torrent_url', value: url };
+      }
+    }
+
+    // No redirect: keep the original URL.
+    return { type: 'url', value: url };
+  } catch (err) {
+    console.error(`[qBit] Erreur résolution Prowlarr:`, err.message);
+    // Return original URL as fallback
+    return { type: 'url', value: url };
+  }
+}
+
+function normalizeMagnet(input) {
+  if (typeof input !== 'string') return input;
+  if (!input.startsWith('magnet:?')) return input;
+
+  const m = input.match(/xt=urn:btih:([a-zA-Z0-9]+)/);
+  if (!m) return input;
+  const btih = m[1];
+
+  const isHex = /^[0-9a-fA-F]+$/.test(btih);
+  if (!isHex) return input;
+
+  if (btih.length === 40) {
+    return input.replace(/xt=urn:btih:[a-zA-Z0-9]+/, `xt=urn:btih:${btih.toLowerCase()}`);
+  }
+
+  if (btih.length === 80) {
+    try {
+      const decoded = Buffer.from(btih, 'hex').toString('utf8');
+      if (/^[0-9a-fA-F]{40}$/.test(decoded)) {
+        return input.replace(/xt=urn:btih:[a-zA-Z0-9]+/, `xt=urn:btih:${decoded.toLowerCase()}`);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  return input;
+}
+
 /**
  * Obtient les informations qBittorrent de l'utilisateur
  * @param {Object} db - Instance de la base de données (paramètre ignoré)
@@ -104,7 +194,11 @@ function normalizeMagnet(input) {
 export async function getQBitUserInfo(db, userId) {
   try {
     const row = await getDb('SELECT qbit_url, qbit_username, qbit_password FROM users WHERE id = ?', [userId]);
+<<<<<<< HEAD
 
+=======
+    
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     return row || {};
   } catch (error) {
     logger.error('Erreur lors de la récupération des informations qBittorrent:', error);
@@ -149,6 +243,7 @@ export async function addTorrentUrlForUser(userId, urlOrMagnet, options = {}) {
     }
   }
 
+<<<<<<< HEAD
   const formData = new FormData();
   formData.append('urls', value);
 
@@ -175,6 +270,31 @@ export async function addTorrentUrlForUser(userId, urlOrMagnet, options = {}) {
   });
 
   logger.debug('qbit', `Réponse qBittorrent: "${qbResponse}"`);
+=======
+  const params = new URLSearchParams();
+  params.append('urls', value);
+
+  if (options?.category) {
+    params.append('category', String(options.category));
+  }
+  if (options?.tags) {
+    params.append('tags', String(options.tags));
+  }
+
+  console.log(`[qBit] Envoi à qBittorrent: ${value.substring(0, 80)}... cat=${options?.category || 'none'}`);
+
+  const qbResponse = await makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/add`, {
+    method: 'POST',
+    body: params,
+    headers: {
+      'Cookie': cookies,
+      'Referer': qbitUrl,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }
+  });
+
+  console.log(`[qBit] Réponse qBittorrent: "${qbResponse}"`);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
   if (qbResponse === 'Fails.') {
     throw new Error("qBittorrent n'a pas pu ajouter le torrent");
@@ -183,10 +303,13 @@ export async function addTorrentUrlForUser(userId, urlOrMagnet, options = {}) {
   return qbResponse;
 }
 
+<<<<<<< HEAD
 // Cache pour les sessions qBittorrent (userId -> { cookies, timestamp, qbitUrl })
 const sessionCache = new Map();
 const SESSION_TTL = 30 * 60 * 1000; // 30 minutes
 
+=======
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 /**
  * Authentifie auprès de qBittorrent avec gestion de cache
  * @param {string} qbitUrl - URL de l'instance qBittorrent

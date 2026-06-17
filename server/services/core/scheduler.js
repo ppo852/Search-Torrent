@@ -10,7 +10,10 @@ import mediaInventoryService from '../media-inventory/index.js';
 import { updateDownloadingEpisodesStatus } from '../media-inventory/episode-status.js';
 import mediaWatcherService from '../media-inventory/watcher.js';
 import { getSetting } from '../settings/index.js';
+<<<<<<< HEAD
 import logger from './logger.js';
+=======
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
 let autoSearchTimeoutId = null;
 let autoSearchIsRunning = false;
@@ -18,14 +21,21 @@ let autoSearchIsRunning = false;
 let mediaScanTimeoutId = null;
 let mediaScanIsRunning = false;
 
+<<<<<<< HEAD
 let rssRefreshIntervalId = null;
 let rssInitialTimeoutId = null;
 
+=======
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 async function refreshPopularFeedsSafe() {
   try {
     await rssService.refreshPopularRSSFeeds();
   } catch (err) {
+<<<<<<< HEAD
     logger.error('Erreur lors du rafraîchissement des flux RSS:', err);
+=======
+    console.error('Erreur lors du rafraîchissement des flux RSS:', err);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   }
 }
 
@@ -42,6 +52,7 @@ export function initializeScheduledTasks() {
   // Démarrer un premier rafraîchissement des flux RSS
   scheduleInitialRssRefresh();
 
+<<<<<<< HEAD
   // Démarrer la recherche automatique
   scheduleAutoSearch();
 
@@ -72,6 +83,19 @@ export async function stopAllTasks() {
 // --- Fin des fonctions de gestion ---
 
 
+=======
+  // Démarrer la recherche automatique (première exécution rapide + intervalle configurable)
+  scheduleAutoSearch();
+
+  scheduleMediaInventoryScan();
+
+  // Watch for filesystem changes to trigger scans sooner (Linux prod)
+  mediaWatcherService.startMediaWatcher().catch((err) => {
+    console.error('[MediaWatcher] Failed to start:', err);
+  });
+}
+
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 export function scheduleMediaInventoryScan(initialDelayMinutes = 2) {
   const delayMs = initialDelayMinutes * 60 * 1000;
 
@@ -94,11 +118,26 @@ export function scheduleMediaInventoryScan(initialDelayMinutes = 2) {
 
         mediaScanIsRunning = true;
         try {
+<<<<<<< HEAD
           await mediaInventoryService.scanNow();
           // Update downloading episodes status after scan
           await updateDownloadingEpisodesStatus();
         } catch (err) {
           logger.error('Erreur lors du scan media inventory (périodique):', err);
+=======
+          const moviesPath = await getSetting('media_movies_path');
+          const seriesPath = await getSetting('media_series_path');
+
+          await mediaInventoryService.scanNow({
+            moviesPath: typeof moviesPath === 'string' ? moviesPath : '/media/Films',
+            seriesPath: typeof seriesPath === 'string' ? seriesPath : '/media/series'
+          });
+
+          // Update downloading episodes status after scan
+          await updateDownloadingEpisodesStatus();
+        } catch (err) {
+          console.error('Erreur lors du scan media inventory (périodique):', err);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
         } finally {
           mediaScanIsRunning = false;
         }
@@ -106,7 +145,11 @@ export function scheduleMediaInventoryScan(initialDelayMinutes = 2) {
         await scheduleNext();
       }, intervalMs);
     } catch (err) {
+<<<<<<< HEAD
       logger.error('Erreur lors de la configuration de l\'intervalle de scan media:', err);
+=======
+      console.error('Erreur lors de la configuration de l\'intervalle de scan media:', err);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
       mediaScanTimeoutId = setTimeout(() => {
         scheduleNext().catch(() => {
           // ignore
@@ -117,11 +160,26 @@ export function scheduleMediaInventoryScan(initialDelayMinutes = 2) {
 
   setTimeout(async () => {
     try {
+<<<<<<< HEAD
       await mediaInventoryService.scanNow();
       // Update downloading episodes status after initial scan
       await updateDownloadingEpisodesStatus();
     } catch (err) {
       logger.error('Erreur lors du scan media inventory (initial):', err);
+=======
+      const moviesPath = await getSetting('media_movies_path');
+      const seriesPath = await getSetting('media_series_path');
+
+      await mediaInventoryService.scanNow({
+        moviesPath: typeof moviesPath === 'string' ? moviesPath : '/media/Films',
+        seriesPath: typeof seriesPath === 'string' ? seriesPath : '/media/series'
+      });
+
+      // Update downloading episodes status after initial scan
+      await updateDownloadingEpisodesStatus();
+    } catch (err) {
+      console.error('Erreur lors du scan media inventory (initial):', err);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     }
 
     await scheduleNext();
@@ -161,7 +219,11 @@ export function scheduleAutoSearch(initialDelayMinutes = 1) {
         try {
           await autoSearchService.runAutoSearchOnce();
         } catch (err) {
+<<<<<<< HEAD
           logger.error('Erreur lors de la recherche auto (périodique):', err);
+=======
+          console.error('Erreur lors de la recherche auto (périodique):', err);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
         } finally {
           autoSearchIsRunning = false;
         }
@@ -169,7 +231,11 @@ export function scheduleAutoSearch(initialDelayMinutes = 1) {
         await scheduleNext();
       }, intervalMs);
     } catch (err) {
+<<<<<<< HEAD
       logger.error('Erreur lors de la configuration de l\'intervalle de recherche auto:', err);
+=======
+      console.error('Erreur lors de la configuration de l\'intervalle de recherche auto:', err);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
       autoSearchTimeoutId = setTimeout(() => {
         scheduleNext().catch(() => {
           // ignore
@@ -182,7 +248,11 @@ export function scheduleAutoSearch(initialDelayMinutes = 1) {
     try {
       await autoSearchService.runAutoSearchOnce();
     } catch (err) {
+<<<<<<< HEAD
       logger.error('Erreur lors de la recherche auto (initiale):', err);
+=======
+      console.error('Erreur lors de la recherche auto (initiale):', err);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     }
 
     await scheduleNext();
@@ -196,7 +266,11 @@ export function scheduleAutoSearch(initialDelayMinutes = 1) {
 function schedulePeriodicRssRefresh(intervalMinutes = 30) {
   const intervalMs = intervalMinutes * 60 * 1000;
   
+<<<<<<< HEAD
   rssRefreshIntervalId = setInterval(() => {
+=======
+  setInterval(() => {
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     refreshPopularFeedsSafe().catch(() => {
       // ignore
     });
@@ -210,7 +284,11 @@ function schedulePeriodicRssRefresh(intervalMinutes = 30) {
 function scheduleInitialRssRefresh(delayMinutes = 5) {
   const delayMs = delayMinutes * 60 * 1000;
   
+<<<<<<< HEAD
   rssInitialTimeoutId = setTimeout(() => {
+=======
+  setTimeout(() => {
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     refreshPopularFeedsSafe().catch(() => {
       // ignore
     });

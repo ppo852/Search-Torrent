@@ -116,4 +116,74 @@ Toutes vos données sont dans le dossier `./data`. Pensez à le sauvegarder rég
 
 ## Licence
 
+<<<<<<< HEAD
 Ce projet est destiné à un usage personnel. Assurez-vous de respecter les droits d'auteur et les règles de vos indexeurs.
+=======
+## 📝 Notes de version v1.3.0
+
+### 🎨 Nouvelle Interface
+- ✨ **Nouvelle page d'accueil style Riven** avec hero section immersive
+- 🎬 Affichage des **films et séries tendance** en scroll horizontal
+- 🔄 **Boutons de navigation** (flèches gauche/droite) pour défiler facilement les sections
+- 📊 **80 médias affichés** au lieu de 40 pour plus de contenu
+- 🎯 Design moderne avec effets glassmorphism et animations fluides
+
+### 🔧 Refactoring & Optimisations
+- ♻️ **Composants réutilisables** : MediaCard et MediaSection
+- 🧹 **Code dupliqué éliminé** : -200 lignes (-58% de réduction)
+- 📦 **Fonction formatYear centralisée** dans utils/formatters.ts
+- 🗑️ **Suppression de la page Sorties** (doublon avec la nouvelle page d'accueil)
+- 🎯 Architecture plus maintenable et évolutive
+
+### 🚀 Backend
+- 🆕 **Nouvel endpoint `/api/tmdb/newest`** : combine films now_playing et séries trending
+- ⚡ **Cache TMDB optimisé** : 1 heure avec invalidation intelligente
+- 🔒 **Sécurité JWT maintenue** et renforcée
+- 📈 **Performance améliorée** : filtrage et entrelacement des résultats
+
+### 📱 Navigation Simplifiée
+- 🏠 **Accueil** : Nouveautés TMDB style Riven (films + séries tendance)
+- 🔍 **Recherche** : Flux RSS et torrents (ancienne page d'accueil renommée)
+- 📚 **Demandes** : Bibliothèque de demandes médias
+- ⚙️ **qBittorrent** : Gestion des torrents
+- 👤 **Admin** : Panneau d'administration
+
+### 🐛 Corrections
+- ✅ Analyse complète du code : 0 duplication, 0 code fantôme
+- ✅ Validation croisée par 2 IA pour garantir la qualité
+- ✅ Production ready avec Docker multi-stage optimisé
+
+---
+
+## 📝 Notes de version v1.2
+
+### Nouveautés
+- Réorganisation complète de l'arborescence des fichiers pour une meilleure maintenabilité
+- Ajout de la catégorisation automatique selon le type de fichier téléchargé
+- Refonte de l'interface pour une utilisation optimale sur petits écrans (responsive mobile)
+
+### Améliorations
+- Préparation complète à la mise en production (sécurité, logs, typage, Docker)
+- Correction de bugs mineurs dans les composants de recherche
+- Optimisation de la configuration Docker et instructions d'installation
+- Renforcement des bonnes pratiques de sécurité (changement du mot de passe admin, gestion des secrets)
+
+---
+
+## 📝 Notes de version v1.1
+
+### Nouvelles fonctionnalités
+- Interface de gestion des torrents améliorée
+- Nouveau design plus moderne et intuitif
+- Gestion centralisée des paramètres qBittorrent par l'administrateur
+- Intégration avec Prowlarr pour la recherche de torrents
+- Support multi-utilisateurs avec rôles admin/utilisateur
+- Gestion des flux RSS Prowlarr
+
+### Corrections et améliorations
+- Optimisation de la stabilité du cache RSS
+- Amélioration des performances de recherche
+- Interface responsive et adaptative
+- Meilleure gestion des erreurs
+- Sécurisation des données sensibles
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed

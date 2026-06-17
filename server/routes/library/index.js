@@ -18,15 +18,22 @@ import {
   selectTvSeasonRequestHandler,
   sendToQbitTvSeasonRequestHandler,
   getTvSeasonPresenceHandler,
+<<<<<<< HEAD
   getTvSeasonHistoryHandler,
   getExistingSeasonsHandler
+=======
+  getTvSeasonHistoryHandler
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 } from './handlers.js';
 
 const router = express.Router();
 
 router.get('/tv', authenticateToken, listTvSeasonRequestsHandler);
 router.post('/tv', authenticateToken, createTvSeasonRequestsHandler);
+<<<<<<< HEAD
 router.get('/tv/check/:tmdbId', authenticateToken, getExistingSeasonsHandler);
+=======
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 router.post('/tv/:id/search', authenticateToken, searchTvSeasonRequestHandler);
 router.post('/tv/:id/search-episode', authenticateToken, searchTvSeasonRequestEpisodeHandler);
 router.post('/tv/:id/auto-search', authenticateToken, autoSearchTvSeasonRequestHandler);

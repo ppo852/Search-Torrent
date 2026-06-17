@@ -11,11 +11,28 @@ class API {
   }
 
   private async handleResponse(response: Response) {
+<<<<<<< HEAD
     if (response.status === 401) {
       console.warn('Session invalide ou expirée (HTTP 401). Déconnexion...');
       useAuthStore.getState().logout();
       window.location.href = '/login';
       throw new Error('Session expirée. Veuillez vous reconnecter.');
+=======
+    if (response.status === 401 || response.status === 403) {
+      const body = await response.clone().json().catch(() => ({} as any));
+      const msg = String(body?.message || body?.error || '').toLowerCase();
+      const isAuthError =
+        response.status === 401 ||
+        msg.includes('token invalide') ||
+        msg.includes('token manquant') ||
+        msg.includes('jwt');
+
+      if (isAuthError) {
+        useAuthStore.getState().logout();
+        window.location.href = '/login';
+        throw new Error('Session expirée. Veuillez vous reconnecter.');
+      }
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     }
 
     if (!response.ok) {
@@ -46,6 +63,27 @@ class API {
   async getUsers() {
     const response = await fetch('/api/users', {
       headers: this.getHeaders()
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async autoSearchTvSeasonRequest(id: string) {
+    const response = await fetch(`/api/library/tv/${id}/auto-search`, {
+      method: 'POST',
+      headers: this.getHeaders()
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async autoSearchTvSeasonEpisodeRequest(id: string, payload: { episode_number: number }) {
+    const response = await fetch(`/api/library/tv/${id}/auto-search-episode`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(payload)
     });
 
     await this.handleResponse(response);
@@ -123,6 +161,15 @@ class API {
 
   async getPublicSettings() {
     const response = await fetch('/api/settings/public', {
+      headers: this.getHeaders(),
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async getClientSettings() {
+    const response = await fetch('/api/settings/client', {
       headers: this.getHeaders(),
     });
 
@@ -376,6 +423,7 @@ class API {
     return response.json();
   }
 
+<<<<<<< HEAD
   async getExistingSeasons(tmdbId: number, mediaType: 'tv' | 'anime' = 'tv') {
     const response = await fetch(`/api/library/tv/check/${tmdbId}?mediaType=${mediaType}`, {
       headers: this.getHeaders()
@@ -385,6 +433,8 @@ class API {
     return response.json();
   }
 
+=======
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   async createTvSeasonRequests(payload: {
     tmdb_id: number;
     media_type: 'tv' | 'anime';
@@ -483,6 +533,7 @@ class API {
     return response.json();
   }
 
+<<<<<<< HEAD
   async scanMediaInventoryNow(options?: { force?: boolean }) {
     const response = await fetch('/api/media-inventory/scan', {
       method: 'POST',
@@ -491,6 +542,12 @@ class API {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(options || {})
+=======
+  async scanMediaInventoryNow() {
+    const response = await fetch('/api/media-inventory/scan', {
+      method: 'POST',
+      headers: this.getHeaders()
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     });
 
     await this.handleResponse(response);
@@ -517,22 +574,38 @@ class API {
     return response.json();
   }
 
+<<<<<<< HEAD
   async searchTvEpisode(title: string, seasonNumber: number, episodeNumber: number, mediaType?: string, tmdbId?: number) {
     const response = await fetch('/api/prowlarr/search/tv/episode', {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ title, seasonNumber, episodeNumber, mediaType, tmdbId })
+=======
+  async searchTvEpisode(title: string, seasonNumber: number, episodeNumber: number, mediaType?: string) {
+    const response = await fetch('/api/prowlarr/search/tv/episode', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ title, seasonNumber, episodeNumber, mediaType })
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     });
 
     await this.handleResponse(response);
     return response.json();
   }
 
+<<<<<<< HEAD
   async searchTvSeries(title: string, mediaType?: string, tmdbId?: number, year?: string) {
     const response = await fetch('/api/prowlarr/search/tv', {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ title, mediaType, tmdbId, year })
+=======
+  async searchTvSeries(title: string, mediaType?: string, tmdbId?: number) {
+    const response = await fetch('/api/prowlarr/search/tv', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ title, mediaType, tmdbId })
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     });
 
     await this.handleResponse(response);

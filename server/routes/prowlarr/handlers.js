@@ -4,7 +4,10 @@
 
 import prowlarrSearchService from '../../services/prowlarr/search.js';
 import { getSetting } from '../../services/settings/index.js';
+<<<<<<< HEAD
 import { getResultCompatibility } from '../../services/utils/validation.js';
+=======
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
 /**
  * Recherche un film avec variantes de titre et filtrage par pertinence
@@ -40,7 +43,15 @@ export async function searchMovieHandler(req, res) {
  */
 export async function searchTvEpisodeHandler(req, res) {
   try {
+<<<<<<< HEAD
     const { title, seasonNumber, episodeNumber, mediaType, tmdbId } = req.body;
+=======
+    const { title, seasonNumber, episodeNumber, mediaType } = req.body;
+
+    if (!title || !seasonNumber || !episodeNumber) {
+      return res.status(400).json({ error: 'Titre, numéro de saison et épisode requis' });
+    }
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
     const minSeedsSetting = await getSetting('min_seeds');
     const minSeeds = typeof minSeedsSetting === 'number' ? minSeedsSetting : 3;
@@ -49,7 +60,10 @@ export async function searchTvEpisodeHandler(req, res) {
       title,
       seasonNumber: Number(seasonNumber),
       episodeNumber: Number(episodeNumber),
+<<<<<<< HEAD
       tmdbId: tmdbId || null,
+=======
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
       mediaType: mediaType || 'tv',
       minSeeds
     });
@@ -66,14 +80,25 @@ export async function searchTvEpisodeHandler(req, res) {
  */
 export async function searchTvSeriesHandler(req, res) {
   try {
+<<<<<<< HEAD
     const { title, mediaType, tmdbId, year } = req.body;
+=======
+    const { title, mediaType, tmdbId } = req.body;
+
+    if (!title) {
+      return res.status(400).json({ error: 'Titre requis' });
+    }
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
     const minSeedsSetting = await getSetting('min_seeds');
     const minSeeds = typeof minSeedsSetting === 'number' ? minSeedsSetting : 3;
 
     const results = await prowlarrSearchService.searchTvSeries({
       title,
+<<<<<<< HEAD
       year: year || '',
+=======
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
       tmdbId: tmdbId || null,
       mediaType: mediaType || 'tv',
       minSeeds
@@ -119,6 +144,7 @@ export async function searchGeneralHandler(req, res) {
 
     // For TV/anime, use series search
     if (category === 'tv' || category === 'anime') {
+<<<<<<< HEAD
       const yearMatch = query.match(/\b(19\d{2}|20\d{2})\b/);
       const year = yearMatch?.[1] || '';
       const title = query.replace(/\b(19\d{2}|20\d{2})\b/, '').trim();
@@ -126,6 +152,10 @@ export async function searchGeneralHandler(req, res) {
       const results = await prowlarrSearchService.searchTvSeries({
         title,
         year,
+=======
+      const results = await prowlarrSearchService.searchTvSeries({
+        title: query,
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
         mediaType: category,
         minSeeds
       });
@@ -133,9 +163,15 @@ export async function searchGeneralHandler(req, res) {
       return res.json({ results });
     }
 
+<<<<<<< HEAD
     const results = await prowlarrSearchService.searchGeneral({
       query,
       category: category === 'all' ? null : (category || null),
+=======
+    // General search (all categories)
+    const results = await prowlarrSearchService.searchGeneral({
+      query,
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
       minSeeds
     });
 

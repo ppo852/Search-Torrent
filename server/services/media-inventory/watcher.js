@@ -1,5 +1,6 @@
 import chokidar from 'chokidar';
 import mediaInventoryService from './index.js';
+<<<<<<< HEAD
 import { updateDownloadingEpisodesStatus } from './episode-status.js';
 import userService from '../users/index.js';
 
@@ -8,6 +9,14 @@ let debounceTimer = null;
 let flushIsRunning = false;
 const pendingAdds = new Set();
 const pendingUnlinks = new Set();
+=======
+import { getSetting } from '../settings/index.js';
+import { updateDownloadingEpisodesStatus } from './episode-status.js';
+
+let watcher = null;
+let debounceTimer = null;
+let scanIsRunning = false;
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
 function isDebug() {
   const v = String(process.env.DEBUG_MEDIA_WATCHER || '').toLowerCase();
@@ -47,6 +56,7 @@ function isVideoFilePath(p) {
   );
 }
 
+<<<<<<< HEAD
 async function flushPendingChanges() {
   if (flushIsRunning) return;
   flushIsRunning = true;
@@ -101,11 +111,35 @@ function scheduleIncrementalChange(reason, filePath) {
     pendingUnlinks.add(filePath);
   }
 
+=======
+async function runScanNow() {
+  if (scanIsRunning) return;
+  scanIsRunning = true;
+  try {
+    const moviesPath = await getSetting('media_movies_path');
+    const seriesPath = await getSetting('media_series_path');
+
+    await mediaInventoryService.scanNow({
+      moviesPath: typeof moviesPath === 'string' ? moviesPath : '/media/Films',
+      seriesPath: typeof seriesPath === 'string' ? seriesPath : '/media/series'
+    });
+
+    await updateDownloadingEpisodesStatus();
+  } catch (err) {
+    console.error('[MediaWatcher] Erreur scan déclenché:', err);
+  } finally {
+    scanIsRunning = false;
+  }
+}
+
+function scheduleScan(reason, filePath) {
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   const debounceMs = getDebounceMs();
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(async () => {
     debounceTimer = null;
     if (isDebug()) {
+<<<<<<< HEAD
       console.log('[MediaWatcher] Traitement incrémental', {
         adds: pendingAdds.size,
         unlinks: pendingUnlinks.size,
@@ -113,6 +147,11 @@ function scheduleIncrementalChange(reason, filePath) {
       });
     }
     await flushPendingChanges();
+=======
+      console.log('[MediaWatcher] Changement détecté, scan déclenché', { reason, file: filePath || null });
+    }
+    await runScanNow();
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   }, debounceMs);
 }
 
@@ -126,6 +165,7 @@ export async function startMediaWatcher() {
 
   if (watcher) return;
 
+<<<<<<< HEAD
   const pathsToWatch = new Set();
 
   const addPaths = (val) => {
@@ -146,6 +186,12 @@ export async function startMediaWatcher() {
   }
 
   const watchPaths = Array.from(pathsToWatch);
+=======
+  const moviesPath = await getSetting('media_movies_path');
+  const seriesPath = await getSetting('media_series_path');
+  const watchPaths = [moviesPath, seriesPath]
+    .filter((v) => typeof v === 'string' && v.trim().length > 0);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
   if (watchPaths.length === 0) {
     if (isDebug()) {
@@ -162,21 +208,37 @@ export async function startMediaWatcher() {
     persistent: true,
     awaitWriteFinish: {
       stabilityThreshold: 30000,
+<<<<<<< HEAD
       pollInterval,
     },
     usePolling,
     interval: pollInterval,
     binaryInterval: pollInterval,
+=======
+      pollInterval
+    },
+    usePolling,
+    interval: pollInterval,
+    binaryInterval: pollInterval
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   });
 
   watcher.on('add', (p) => {
     if (!isVideoFilePath(p)) return;
+<<<<<<< HEAD
     scheduleIncrementalChange('add', p);
+=======
+    scheduleScan('add', p);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   });
 
   watcher.on('unlink', (p) => {
     if (!isVideoFilePath(p)) return;
+<<<<<<< HEAD
     scheduleIncrementalChange('unlink', p);
+=======
+    scheduleScan('unlink', p);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   });
 
   watcher.on('error', (err) => {
@@ -184,7 +246,11 @@ export async function startMediaWatcher() {
   });
 
   if (isDebug()) {
+<<<<<<< HEAD
     console.log('[MediaWatcher] Actif (incrémental)', { paths: watchPaths, usePolling, pollInterval, debounceMs: getDebounceMs() });
+=======
+    console.log('[MediaWatcher] Actif', { paths: watchPaths, usePolling, pollInterval, debounceMs: getDebounceMs() });
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   }
 }
 
@@ -193,8 +259,11 @@ export async function stopMediaWatcher() {
     clearTimeout(debounceTimer);
     debounceTimer = null;
   }
+<<<<<<< HEAD
   pendingAdds.clear();
   pendingUnlinks.clear();
+=======
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   if (watcher) {
     try {
       await watcher.close();
@@ -207,5 +276,9 @@ export async function stopMediaWatcher() {
 
 export default {
   startMediaWatcher,
+<<<<<<< HEAD
   stopMediaWatcher,
+=======
+  stopMediaWatcher
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 };

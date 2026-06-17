@@ -21,19 +21,31 @@ export function MediaSection({ title, items, onMediaClick }: MediaSectionProps) 
 
   return (
     <section className="mb-12 relative group">
+<<<<<<< HEAD
       <h2 className="text-xl font-bold text-white mb-6 pl-4 relative before:content-[''] before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-1 before:h-6 before:bg-gradient-to-b before:from-blue-500 before:to-purple-600 before:rounded">
+=======
+      <h2 className="text-2xl font-bold text-white mb-6 pl-4 relative before:content-[''] before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-1 before:h-6 before:bg-gradient-to-b before:from-blue-500 before:to-purple-600 before:rounded">
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
         {title}
       </h2>
       <button
         onClick={() => scroll('left')}
+<<<<<<< HEAD
         className="absolute left-0 top-1/2 -translate-y-1/2 z-10 bg-black/80 hover:bg-black text-white p-2 rounded-full md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+=======
+        className="absolute left-0 top-1/2 -translate-y-1/2 z-10 bg-black/80 hover:bg-black text-white p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
         aria-label="Précédent"
       >
         <ChevronLeft size={24} />
       </button>
       <button
         onClick={() => scroll('right')}
+<<<<<<< HEAD
         className="absolute right-0 top-1/2 -translate-y-1/2 z-10 bg-black/80 hover:bg-black text-white p-2 rounded-full md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+=======
+        className="absolute right-0 top-1/2 -translate-y-1/2 z-10 bg-black/80 hover:bg-black text-white p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
         aria-label="Suivant"
       >
         <ChevronRight size={24} />

@@ -1,9 +1,14 @@
 import fetch from 'node-fetch';
 import { getSetting } from '../../services/settings/index.js';
+<<<<<<< HEAD
 import { getAppCache, setAppCache } from '../../services/core/app-cache.js';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const NEWEST_CACHE_TTL_MINUTES = 60;
+=======
+
+const ONE_HOUR_MS = 60 * 60 * 1000;
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
 const cache = new Map();
 
@@ -71,7 +76,10 @@ function mapTmdbListResult(items, type) {
       originalTitle: originalTitle || title || '',
       releaseDate: releaseDate || '',
       posterPath: item.poster_path ? `https://image.tmdb.org/t/p/w185${item.poster_path}` : null,
+<<<<<<< HEAD
       backdropPath: item.backdrop_path ? `https://image.tmdb.org/t/p/original${item.backdrop_path}` : null,
+=======
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
       type,
       overview: item.overview || '',
       voteAverage: typeof item.vote_average === 'number' ? item.vote_average : 0
@@ -147,11 +155,14 @@ export async function getUpcomingTvHandler(req, res) {
 export async function getNewestMediaHandler(req, res) {
   try {
     const limit = req.query.limit ? Number(req.query.limit) : 40;
+<<<<<<< HEAD
     const cacheKey = `tmdb-newest:${limit}`;
     const cached = await getAppCache(cacheKey);
     if (cached) {
       return res.json(cached);
     }
+=======
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
     // Fetch movies and TV shows in parallel
     const [moviesData, tvData] = await Promise.all([
@@ -192,9 +203,13 @@ export async function getNewestMediaHandler(req, res) {
       if (i < shows.length) combined.push(shows[i]);
     }
 
+<<<<<<< HEAD
     const result = combined.slice(0, limit);
     await setAppCache(cacheKey, result, NEWEST_CACHE_TTL_MINUTES);
     res.json(result);
+=======
+    res.json(combined.slice(0, limit));
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : 'Erreur serveur' });
   }

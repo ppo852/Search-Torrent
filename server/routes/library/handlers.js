@@ -1,25 +1,42 @@
 import { randomUUID } from 'crypto';
+<<<<<<< HEAD
 import { get, query, run } from '../../services/core/db.js';
 import { getSetting } from '../../services/settings/index.js';
+=======
+import fetch from 'node-fetch';
+import { get, query, run } from '../../services/core/db.js';
+import { getSetting } from '../../services/settings/index.js';
+import FormData from 'form-data';
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 import qBittorrentService from '../../services/qbittorrent/index.js';
 import autoSearchService from '../../services/auto-search/index.js';
 import mediaInventoryService from '../../services/media-inventory/index.js';
 import prowlarrSearchService, {
   getProwlarrCategoryId,
+<<<<<<< HEAD
   isCompleteSeasonTitle
 } from '../../services/prowlarr/search.js';
 import tmdbService from '../../services/tmdb/index.js';
 import logger from '../../services/core/logger.js';
+=======
+  pickBestProwlarrLink,
+  getTmdbMovieTitleVariants,
+  isCompleteSeasonTitle
+} from '../../services/prowlarr/search.js';
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 import {
   flattenKeywords,
   titleContainsAny
 } from '../../services/utils/keywords.js';
+<<<<<<< HEAD
 import { getResultCompatibility } from '../../services/utils/validation.js';
 import { loadAssignedQualityProfile } from '../../services/utils/helpers.js';
 import { reconcileStaleTvEpisodeDownloads } from '../../services/media-inventory/episode-status.js';
 import { buildQbitTagsString } from '../../services/tv-season/qbit-tags.js';
 import { insertTvSeasonHistory, markTvEpisodeCompleted, markTvEpisodeError } from '../../services/tv-season/downloads.js';
 import { inferQbitCategoryFromMediaType } from '../../services/utils/qbit-categories.js';
+=======
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
 export async function getTvSeasonHistoryHandler(req, res) {
   try {
@@ -44,7 +61,11 @@ export async function getTvSeasonHistoryHandler(req, res) {
 
     res.json(rows || []);
   } catch (error) {
+<<<<<<< HEAD
     logger.error('Erreur lors de la récupération de l\'historique TV:', error);
+=======
+    console.error('Erreur lors de la récupération de l\'historique TV:', error);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
@@ -82,7 +103,11 @@ export async function autoSearchTvSeasonRequestHandler(req, res) {
     res.json({ request: updated, result });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erreur serveur';
+<<<<<<< HEAD
     logger.error('Erreur lors de la recherche automatique (tv_season_requests):', error);
+=======
+    console.error('Erreur lors de la recherche automatique (tv_season_requests):', error);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     res.status(500).json({ error: message });
   }
 }
@@ -139,34 +164,140 @@ export async function getTvSeasonPresenceHandler(req, res) {
 
     if (!season) return res.status(404).json({ error: 'Élément non trouvé' });
 
+<<<<<<< HEAD
     const episodes = await tmdbService.getSeasonEpisodes(season.tmdb_id, season.season_number);
     const episodeNumbers = episodes.map(e => e.episodeNumber);
 
     // Épisodes marqués completed en base (re-vérifiés sur le disque)
+=======
+    const episodeNumbers = await getTmdbSeasonEpisodeNumbers(season.tmdb_id, season.season_number);
+    
+    // Get episodes already completed (never re-check these)
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     const completedRows = await query(
       `SELECT episode_number FROM tv_episode_downloads
        WHERE tv_season_request_id = ? AND status = 'completed'`,
       [id]
     );
     const completedEpisodes = new Set((completedRows || []).map(r => r.episode_number));
+<<<<<<< HEAD
 
     const { errorEpisodesByRequest } = await reconcileStaleTvEpisodeDownloads({ tvSeasonRequestId: id });
     const errorEpisodesSet = errorEpisodesByRequest.get(id) ?? new Set();
 
+=======
+    
+    // Get episodes currently downloading
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     const downloadingRows = await query(
       `SELECT episode_number, sent_at, torrent_name
        FROM tv_episode_downloads
        WHERE tv_season_request_id = ? AND status = 'downloading'`,
       [id]
     );
+<<<<<<< HEAD
     const downloadingEpisodes = (downloadingRows || []).map(r => r.episode_number);
+=======
+    let downloadingEpisodes = (downloadingRows || []).map(r => r.episode_number);
+
+    const staleMs = 60 * 60 * 1000;
+    const nowMs = Date.now();
+    const staleRows = (downloadingRows || []).filter((r) => {
+      const sentMs = r?.sent_at ? new Date(r.sent_at).getTime() : NaN;
+      // Never check stale for episodes already completed
+      return Number.isFinite(sentMs) && (nowMs - sentMs) > staleMs && !completedEpisodes.has(r.episode_number);
+    });
+
+    const errorEpisodesSet = new Set();
+    if (staleRows.length > 0) {
+      try {
+        const qbitUser = await qBittorrentService.getQBitUserInfo(null, season.user_id);
+        if (qbitUser?.qbit_url) {
+          const qbitUrl = qbitUser.qbit_url.trim().replace(/\/+$/, '');
+          let cookies = '';
+          if (qbitUser.qbit_username && qbitUser.qbit_password) {
+            cookies = await qBittorrentService.authenticateQBittorrent(qbitUrl, qbitUser.qbit_username, qbitUser.qbit_password);
+          }
+
+          const torrents = await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/info`, {
+            headers: {
+              'Cookie': cookies,
+              'Referer': qbitUrl
+            }
+          });
+
+          const torrentNames = new Set((torrents || []).map((t) => String(t?.name || '')));
+          const wantedTag = `st:req:${String(id)}`;
+          const torrentsForThisRequest = new Set(
+            (torrents || [])
+              .filter((t) => String(t?.tags || '').split(',').map((x) => x.trim()).includes(wantedTag))
+              .map((t) => String(t?.name || ''))
+          );
+          const nowIso = new Date().toISOString();
+
+          for (const row of staleRows) {
+            const tname = String(row?.torrent_name || '').trim();
+            if (!tname) continue;
+            const existsByTag = torrentsForThisRequest.size > 0 ? torrentsForThisRequest.has(tname) : null;
+            const exists = existsByTag === null ? torrentNames.has(tname) : existsByTag;
+            if (!exists) {
+              errorEpisodesSet.add(row.episode_number);
+              // eslint-disable-next-line no-await-in-loop
+              await run(
+                `UPDATE tv_episode_downloads SET status = 'error' WHERE tv_season_request_id = ? AND episode_number = ?`,
+                [id, row.episode_number]
+              );
+              // eslint-disable-next-line no-await-in-loop
+              await run(
+                `INSERT INTO tv_season_request_history (id, tv_season_request_id, user_id, tmdb_id, media_type, title, season_number, episode_number, action, torrent_name, torrent_magnet, torrent_size, torrent_seeds, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  randomUUID(),
+                  id,
+                  season.user_id,
+                  season.tmdb_id,
+                  season.media_type,
+                  season.title,
+                  season.season_number,
+                  row.episode_number,
+                  'download_missing_in_qbit',
+                  tname,
+                  null,
+                  null,
+                  null,
+                  nowIso
+                ]
+              );
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (errorEpisodesSet.size > 0) {
+      downloadingEpisodes = downloadingEpisodes.filter((ep) => !errorEpisodesSet.has(ep));
+    }
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
     const present = [];
     const downloading = [];
     const missing = [];
     const errorEpisodes = [];
+<<<<<<< HEAD
 
     for (const ep of episodeNumbers) {
+=======
+    
+    for (const ep of episodeNumbers) {
+      // If episode is already completed, always show as present (never re-check)
+      if (completedEpisodes.has(ep)) {
+        present.push(ep);
+        continue;
+      }
+      
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
       // eslint-disable-next-line no-await-in-loop
       const p = await mediaInventoryService.isPresent({
         kind: 'tv',
@@ -175,6 +306,7 @@ export async function getTvSeasonPresenceHandler(req, res) {
         episode: ep,
         tmdb_id: season.tmdb_id
       });
+<<<<<<< HEAD
 
       if (p?.present) {
         present.push(ep);
@@ -187,6 +319,19 @@ export async function getTvSeasonPresenceHandler(req, res) {
         // eslint-disable-next-line no-await-in-loop
         await markTvEpisodeError({ requestId: id, episodeNumber: ep });
         missing.push(ep);
+=======
+      
+      if (p?.present) {
+        present.push(ep);
+        // If episode is now present, mark download as completed
+        if (downloadingEpisodes.includes(ep)) {
+          // eslint-disable-next-line no-await-in-loop
+          await run(
+            `UPDATE tv_episode_downloads SET status = 'completed', completed_at = ? WHERE tv_season_request_id = ? AND episode_number = ?`,
+            [new Date().toISOString(), id, ep]
+          );
+        }
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
       } else if (errorEpisodesSet.has(ep)) {
         errorEpisodes.push(ep);
       } else if (downloadingEpisodes.includes(ep)) {
@@ -230,8 +375,59 @@ export async function getTvSeasonPresenceHandler(req, res) {
   }
 }
 
+<<<<<<< HEAD
 // Supprimé au profit de tmdbService.getSeasonEpisodes
 
+=======
+async function getTmdbSeasonEpisodeNumbers(tmdbId, seasonNumber) {
+  const token = await getSetting('tmdb_access_token');
+  if (!token) return [];
+  const url = new URL(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonNumber}`);
+  url.searchParams.append('language', 'en-US');
+  const response = await fetch(url.toString(), {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${String(token)}`,
+      'Content-Type': 'application/json'
+    }
+  });
+  if (!response.ok) return [];
+  const data = await response.json().catch(() => null);
+  const episodes = Array.isArray(data?.episodes) ? data.episodes : [];
+  const nums = episodes
+    .map((e) => Number(e?.episode_number))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  return Array.from(new Set(nums)).sort((a, b) => a - b);
+}
+
+function getResultCompatibility(result, profile) {
+  if (!profile) return { is_compatible: true, incompatible_reason: null };
+
+  const minMb = typeof profile.min_size_mb === 'number' ? profile.min_size_mb : 0;
+  const maxMb = typeof profile.max_size_mb === 'number' ? profile.max_size_mb : 0;
+  const minBytes = minMb > 0 ? minMb * 1024 * 1024 : 0;
+  const maxBytes = maxMb > 0 ? maxMb * 1024 * 1024 : 0;
+  const required = Array.isArray(profile.required_keywords) ? profile.required_keywords : [];
+  const blocked = Array.isArray(profile.blocked_keywords) ? profile.blocked_keywords : [];
+
+  const size = result?.size || 0;
+  if (minBytes > 0 && size > 0 && size < minBytes) {
+    return { is_compatible: false, incompatible_reason: `Taille trop petite (min ${minMb} MB)` };
+  }
+  if (maxBytes > 0 && size > 0 && size > maxBytes) {
+    return { is_compatible: false, incompatible_reason: `Taille trop grande (max ${maxMb} MB)` };
+  }
+  if (required.length > 0 && !titleContainsAny(result?.name, required)) {
+    const flat = flattenKeywords(required);
+    return { is_compatible: false, incompatible_reason: `Aucun mot-clé requis trouvé: ${flat.join(', ')}` };
+  }
+  if (blocked.length > 0 && titleContainsAny(result?.name, blocked)) {
+    const flat = flattenKeywords(blocked);
+    return { is_compatible: false, incompatible_reason: `Mots-clés bloqués détectés: ${flat.join(', ')}` };
+  }
+  return { is_compatible: true, incompatible_reason: null };
+}
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
 function canManageRequest(req, request) {
   if (!request) return false;
@@ -312,6 +508,7 @@ export async function searchTvSeasonRequestEpisodeHandler(req, res) {
       return res.status(403).json({ error: 'Action non autorisée' });
     }
 
+<<<<<<< HEAD
     const results = await prowlarrSearchService.searchTvEpisode({
       title: requestItem.title,
       seasonNumber: requestItem.season_number,
@@ -327,11 +524,105 @@ export async function searchTvSeasonRequestEpisodeHandler(req, res) {
     const assignedProfile = loadAssignedQualityProfile(requestItem.media_type, profiles, assignments);
 
     const resultsWithCompatibility = results.map((r) => ({
+=======
+    const prowlarrUrl = await getSetting('prowlarr_url');
+    const prowlarrApiKey = await getSetting('prowlarr_api_key');
+    const minSeedsSetting = await getSetting('min_seeds');
+    const profiles = await getSetting('quality_profiles');
+    const assignments = await getSetting('quality_profile_assignments');
+
+    const minSeeds = typeof minSeedsSetting === 'number' ? minSeedsSetting : 3;
+    if (!prowlarrUrl || !prowlarrApiKey) {
+      return res.status(400).json({ error: 'Prowlarr non configuré' });
+    }
+
+    const categoryId = getProwlarrCategoryId(requestItem.media_type);
+    const episodeToken = buildEpisodeToken(requestItem.season_number, targetEpisodeNumber);
+
+    const runSearch = async (queryText) => {
+      const url = new URL('/api/v1/search', prowlarrUrl);
+      url.searchParams.append('query', queryText);
+      if (categoryId) {
+        String(categoryId)
+          .split(',')
+          .map((v) => v.trim())
+          .filter(Boolean)
+          .forEach((id) => {
+            url.searchParams.append('categories', id);
+          });
+      }
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'X-Api-Key': prowlarrApiKey,
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Prowlarr API error: ${response.status} - ${errorText || response.statusText}`);
+      }
+
+      const data = await response.json();
+      const results = Array.isArray(data) ? data : [];
+      return results
+        .map(item => ({
+          name: item.title,
+          link: pickBestProwlarrLink(item),
+          size: item.size || 0,
+          seeds: item.seeders || 0,
+          leech: item.peers || 0,
+          engine_url: item.indexer || '',
+          desc_link: item.infoUrl || '',
+          publishDate: item.publishDate || item.pubDate || null
+        }))
+        .filter(item => item.link)
+        .filter(item => item.seeds >= minSeeds);
+    };
+
+    const safeProfiles = Array.isArray(profiles) ? profiles : [];
+    const assignedProfileId = assignments?.tv_profile_id;
+    const assignedProfile = assignedProfileId
+      ? safeProfiles.find((p) => p?.id === assignedProfileId) || null
+      : null;
+
+    const episodeRegex = buildEpisodeMatchRegex(requestItem.season_number, targetEpisodeNumber) ||
+      new RegExp(episodeToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+
+    let normalized = await runSearch(`${requestItem.title} ${episodeToken}`);
+    normalized = normalized.filter((r) => episodeRegex.test(String(r.name || '')));
+
+    const normalizedWithCompatibility = normalized.map((r) => ({
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
       ...r,
       ...getResultCompatibility(r, assignedProfile)
     }));
 
+<<<<<<< HEAD
     res.json({ results: resultsWithCompatibility });
+=======
+    const now = new Date().toISOString();
+    await run(
+      `UPDATE tv_season_requests
+       SET last_checked_at = ?, last_error = ?
+       WHERE id = ?`,
+      [now, null, id]
+    );
+
+    const updated = await get(
+      `SELECT id, user_id, tmdb_id, media_type, title, poster_url, season_number, status, next_episode_number,
+              last_checked_at, last_error,
+              matched_torrent_name, matched_torrent_magnet, matched_torrent_size, matched_torrent_seeds,
+              created_at
+       FROM tv_season_requests
+       WHERE id = ?`,
+      [id]
+    );
+
+    res.json({ request: updated, episode_number: targetEpisodeNumber, results: normalizedWithCompatibility });
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   } catch (error) {
     const now = new Date().toISOString();
     const message = error instanceof Error ? error.message : 'Erreur serveur';
@@ -372,6 +663,7 @@ export async function searchTvSeasonRequestHandler(req, res) {
       return res.status(403).json({ error: 'Action non autorisée' });
     }
 
+<<<<<<< HEAD
     // Récupérer le nombre d'épisodes pour adapter les filtres de taille
     const episodes = await tmdbService.getSeasonEpisodes(requestItem.tmdb_id, requestItem.season_number);
     const episodeCount = (episodes || []).length || 1;
@@ -388,18 +680,120 @@ export async function searchTvSeasonRequestHandler(req, res) {
     const profiles = await getSetting('quality_profiles');
     const assignments = await getSetting('quality_profile_assignments');
 
+=======
+    const prowlarrUrl = await getSetting('prowlarr_url');
+    const prowlarrApiKey = await getSetting('prowlarr_api_key');
+    const minSeedsSetting = await getSetting('min_seeds');
+    const profiles = await getSetting('quality_profiles');
+    const assignments = await getSetting('quality_profile_assignments');
+
+    const minSeeds = typeof minSeedsSetting === 'number' ? minSeedsSetting : 3;
+
+    if (!prowlarrUrl || !prowlarrApiKey) {
+      return res.status(400).json({ error: 'Prowlarr non configuré' });
+    }
+
+    const categoryId = getProwlarrCategoryId(requestItem.media_type);
+
+    const episodeToken = buildEpisodeToken(requestItem.season_number, requestItem.next_episode_number);
+    const seasonToken = buildSeasonToken(requestItem.season_number);
+
+    const runSearch = async (queryText) => {
+      const url = new URL('/api/v1/search', prowlarrUrl);
+      url.searchParams.append('query', queryText);
+      if (categoryId) {
+        String(categoryId)
+          .split(',')
+          .map((v) => v.trim())
+          .filter(Boolean)
+          .forEach((id) => {
+            url.searchParams.append('categories', id);
+          });
+      }
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'X-Api-Key': prowlarrApiKey,
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Prowlarr API error: ${response.status} - ${errorText || response.statusText}`);
+      }
+
+      const data = await response.json();
+      const results = Array.isArray(data) ? data : [];
+      return results
+        .map(item => ({
+          name: item.title,
+          link: pickBestProwlarrLink(item),
+          size: item.size || 0,
+          seeds: item.seeders || 0,
+          leech: item.peers || 0,
+          engine_url: item.indexer || '',
+          desc_link: item.infoUrl || '',
+          publishDate: item.publishDate || item.pubDate || null
+        }))
+        .filter(item => item.link)
+        .filter(item => item.seeds >= minSeeds);
+    };
+
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     const safeProfiles = Array.isArray(profiles) ? profiles : [];
     const assignedProfileId = assignments?.tv_profile_id;
     const assignedProfile = assignedProfileId
       ? safeProfiles.find((p) => p?.id === assignedProfileId) || null
       : null;
 
+<<<<<<< HEAD
     const resultsWithCompatibility = results.map((r) => ({
       ...r,
       ...getResultCompatibility(r, assignedProfile, episodeCount)
     }));
 
     res.json({ results: resultsWithCompatibility });
+=======
+    const episodeRegex = new RegExp(episodeToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    const seasonRegex = new RegExp(seasonToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+
+    let normalized = await runSearch(`${requestItem.title} ${episodeToken}`);
+    normalized = normalized.filter((r) => episodeRegex.test(String(r.name || '')));
+
+    if (normalized.length === 0) {
+      const seasonCandidates = await runSearch(`${requestItem.title} ${seasonToken}`);
+      normalized = seasonCandidates
+        .filter((r) => seasonRegex.test(String(r.name || '')))
+        .filter((r) => isCompleteSeasonTitle(r.name));
+    }
+
+    const normalizedWithCompatibility = normalized.map((r) => ({
+      ...r,
+      ...getResultCompatibility(r, assignedProfile)
+    }));
+
+    const now = new Date().toISOString();
+    await run(
+      `UPDATE tv_season_requests
+       SET last_checked_at = ?, last_error = ?
+       WHERE id = ?`,
+      [now, null, id]
+    );
+
+    const updated = await get(
+      `SELECT id, user_id, tmdb_id, media_type, title, poster_url, season_number, status, next_episode_number,
+              last_checked_at, last_error,
+              matched_torrent_name, matched_torrent_magnet, matched_torrent_size, matched_torrent_seeds,
+              created_at
+       FROM tv_season_requests
+       WHERE id = ?`,
+      [id]
+    );
+
+    res.json({ request: updated, results: normalizedWithCompatibility });
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
   } catch (error) {
     const now = new Date().toISOString();
     const message = error instanceof Error ? error.message : 'Erreur serveur';
@@ -526,6 +920,7 @@ export async function sendToQbitTvSeasonRequestHandler(req, res) {
       });
     }
 
+<<<<<<< HEAD
     const category = inferQbitCategoryFromMediaType(requestItem.media_type) || 'Séries';
     
     await qBittorrentService.addTorrentUrlForUser(requestItem.user_id, requestItem.matched_torrent_magnet, {
@@ -535,11 +930,35 @@ export async function sendToQbitTvSeasonRequestHandler(req, res) {
         seasonNumber: requestItem.season_number,
         episodeNumber: targetEpisodeNumber ?? requestItem.next_episode_number
       })
+=======
+    const user = await qBittorrentService.getQBitUserInfo(null, requestItem.user_id);
+    if (!user?.qbit_url) {
+      return res.status(400).json({ error: 'URL qBittorrent non configurée' });
+    }
+
+    const qbitUrl = user.qbit_url.trim().replace(/\/+$/, '');
+    const cookies = await qBittorrentService.authenticateQBittorrent(qbitUrl, user.qbit_username, user.qbit_password);
+
+    const formData = new FormData();
+    formData.append('urls', requestItem.matched_torrent_magnet);
+
+    const category = requestItem.media_type === 'anime' ? 'Anime' : 'Séries';
+    formData.append('category', category);
+
+    await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/add`, {
+      method: 'POST',
+      body: formData,
+      headers: {
+        'Cookie': cookies,
+        'Referer': qbitUrl
+      }
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     });
 
     const now = new Date().toISOString();
     const tokenEpisodeNumber = targetEpisodeNumber ?? requestItem.next_episode_number;
 
+<<<<<<< HEAD
     await insertTvSeasonHistory({
       tvSeasonRequestId: id,
       userId: requestItem.user_id,
@@ -556,6 +975,34 @@ export async function sendToQbitTvSeasonRequestHandler(req, res) {
       createdAt: now
     });
 
+=======
+    try {
+      await run(
+        `INSERT INTO tv_season_request_history (
+          id, tv_season_request_id, user_id, tmdb_id, media_type, title, season_number, episode_number,
+          action, torrent_name, torrent_magnet, torrent_size, torrent_seeds, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          randomUUID(),
+          id,
+          requestItem.user_id,
+          requestItem.tmdb_id ?? null,
+          requestItem.media_type,
+          requestItem.title,
+          requestItem.season_number,
+          tokenEpisodeNumber,
+          force ? 'sent_forced' : 'sent',
+          requestItem.matched_torrent_name || null,
+          requestItem.matched_torrent_magnet || null,
+          typeof requestItem.matched_torrent_size === 'number' ? requestItem.matched_torrent_size : null,
+          typeof requestItem.matched_torrent_seeds === 'number' ? requestItem.matched_torrent_seeds : null,
+          now
+        ]
+      );
+    } catch {
+      // ignore history errors
+    }
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     const episodeToken = buildEpisodeToken(requestItem.season_number, tokenEpisodeNumber);
     const episodeRegex = new RegExp(episodeToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
     const isEpisodeMatch = episodeRegex.test(String(requestItem.matched_torrent_name || ''));
@@ -575,7 +1022,11 @@ export async function sendToQbitTvSeasonRequestHandler(req, res) {
         `UPDATE tv_season_requests
          SET status = ?, last_checked_at = ?, last_error = ?
          WHERE id = ?`,
+<<<<<<< HEAD
         ['monitoring', now, null, id]
+=======
+        ['sent_to_qbit', now, null, id]
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
       );
     } else {
       await run(
@@ -633,6 +1084,7 @@ export async function listTvSeasonRequestsHandler(req, res) {
 
     res.json(items || []);
   } catch (error) {
+<<<<<<< HEAD
     logger.error('Erreur lors de la récupération du suivi tv_season_requests:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
@@ -652,6 +1104,9 @@ export async function getExistingSeasonsHandler(req, res) {
     res.json(rows.map(r => r.season_number));
   } catch (error) {
     logger.error('Erreur lors de la récupération des saisons existantes:', error);
+=======
+    console.error('Erreur lors de la récupération du suivi tv_season_requests:', error);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
@@ -715,8 +1170,12 @@ export async function createTvSeasonRequestsHandler(req, res) {
       let presentEpisodes = [];
       let missingEpisodes = [];
       try {
+<<<<<<< HEAD
         const episodes = await tmdbService.getSeasonEpisodes(tmdb_id, seasonNumber);
         const episodeNumbers = episodes.map(e => e.episodeNumber);
+=======
+        const episodeNumbers = await getTmdbSeasonEpisodeNumbers(tmdb_id, seasonNumber);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
         if (episodeNumbers.length > 0) {
           for (const ep of episodeNumbers) {
             // eslint-disable-next-line no-await-in-loop
@@ -788,9 +1247,12 @@ export async function createTvSeasonRequestsHandler(req, res) {
 
       if (missingEpisodes.length > 0) {
         createdForAutoSearch.push(id);
+<<<<<<< HEAD
         logger.info(`[Library] Saison ${seasonNumber} de "${title}" ajoutée. ${missingEpisodes.length} épisodes manquants détectés.`);
       } else {
         logger.info(`[Library] Saison ${seasonNumber} de "${title}" ajoutée. Aucun épisode manquant détecté (scan auto ignoré).`);
+=======
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
       }
     }
 
@@ -811,7 +1273,13 @@ export async function createTvSeasonRequestsHandler(req, res) {
       setTimeout(() => {
         (async () => {
           const dbgOnCreate = ['1', 'true', 'yes'].includes(String(process.env.DEBUG_AUTOSEARCH_ON_CREATE || '').toLowerCase());
+<<<<<<< HEAD
           logger.info(`[AutoSearch] Lancement du premier scan pour ${createdForAutoSearch.length} nouvelle(s) demande(s)...`);
+=======
+          if (dbgOnCreate) {
+            console.log('[AutoSearch][onCreate] Trigger', { count: createdForAutoSearch.length });
+          }
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
           for (const id of createdForAutoSearch) {
             try {
               // Ensure auto-search runs as the request owner
@@ -820,7 +1288,11 @@ export async function createTvSeasonRequestsHandler(req, res) {
               // eslint-disable-next-line no-await-in-loop
               await autoSearchService.runAutoSearchForTvSeasonRequest({ requestId: id, userId: ownerRow?.user_id });
             } catch (err) {
+<<<<<<< HEAD
               logger.error(`[AutoSearch][onCreate] Erreur (requestId=${id}):`, err);
+=======
+              console.error(`[AutoSearch][onCreate] Erreur (requestId=${id}):`, err);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
             }
           }
         })().catch(() => {
@@ -829,7 +1301,11 @@ export async function createTvSeasonRequestsHandler(req, res) {
       }, 0);
     }
   } catch (error) {
+<<<<<<< HEAD
     logger.error('Erreur lors de la création du suivi par saison:', error);
+=======
+    console.error('Erreur lors de la création du suivi par saison:', error);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
@@ -873,7 +1349,11 @@ export async function deleteTvSeasonRequestHandler(req, res) {
       res.status(500).json({ error: 'Erreur lors de la suppression' });
     }
   } catch (error) {
+<<<<<<< HEAD
     logger.error('Erreur lors de la suppression du suivi tv_season_requests:', error);
+=======
+    console.error('Erreur lors de la suppression du suivi tv_season_requests:', error);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
@@ -905,6 +1385,7 @@ export async function searchLibraryItemHandler(req, res) {
     const year = requestItem.release_date ? String(requestItem.release_date).split('-')[0] : '';
 
     // Use centralized search service
+<<<<<<< HEAD
     const searchOptions = {
       title: requestItem.title,
       year,
@@ -918,6 +1399,23 @@ export async function searchLibraryItemHandler(req, res) {
       : await prowlarrSearchService.searchTvSeries({ ...searchOptions, mediaType: requestItem.media_type });
 
     const assignedProfile = loadAssignedQualityProfile(requestItem.media_type, profiles, assignments);
+=======
+    const searchResults = await prowlarrSearchService.searchMovie({
+      title: requestItem.title,
+      year,
+      tmdbId: requestItem.tmdb_id,
+      minSeeds,
+      filterByRelevance: true
+    });
+
+    const safeProfiles = Array.isArray(profiles) ? profiles : [];
+    const assignedProfileId = requestItem.media_type === 'movie'
+      ? assignments?.movie_profile_id
+      : assignments?.tv_profile_id;
+    const assignedProfile = assignedProfileId
+      ? safeProfiles.find((p) => p?.id === assignedProfileId) || null
+      : null;
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
 
     const normalizedWithCompatibility = searchResults.map((r) => ({
       ...r,
@@ -965,7 +1463,11 @@ export async function searchLibraryItemHandler(req, res) {
       // ignore
     }
 
+<<<<<<< HEAD
     logger.error('Erreur lors de la recherche Prowlarr:', error);
+=======
+    console.error('Erreur lors de la recherche Prowlarr:', error);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     res.status(500).json({ error: message });
   }
 }
@@ -1008,7 +1510,11 @@ export async function autoSearchLibraryItemHandler(req, res) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erreur serveur';
+<<<<<<< HEAD
     logger.error('Erreur lors de la recherche automatique:', error);
+=======
+    console.error('Erreur lors de la recherche automatique:', error);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     res.status(500).json({ error: message });
   }
 }
@@ -1069,7 +1575,11 @@ export async function selectLibraryItemHandler(req, res) {
       monitored: !!updated?.monitored
     });
   } catch (error) {
+<<<<<<< HEAD
     logger.error('Erreur lors de la sélection du torrent:', error);
+=======
+    console.error('Erreur lors de la sélection du torrent:', error);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     res.status(500).json({ error: error instanceof Error ? error.message : 'Erreur serveur' });
   }
 }
@@ -1114,11 +1624,36 @@ export async function sendToQbitLibraryItemHandler(req, res) {
       });
     }
 
+<<<<<<< HEAD
     const category = inferQbitCategoryFromMediaType(requestItem.media_type) || 'Autres';
 
     await qBittorrentService.addTorrentUrlForUser(requestItem.user_id, requestItem.matched_torrent_magnet, {
       category,
       tags: buildQbitTagsString({ requestId: id })
+=======
+    const user = await qBittorrentService.getQBitUserInfo(null, requestItem.user_id);
+    if (!user?.qbit_url) {
+      return res.status(400).json({ error: 'URL qBittorrent non configurée' });
+    }
+
+    const qbitUrl = user.qbit_url.trim().replace(/\/+$/, '');
+    const cookies = await qBittorrentService.authenticateQBittorrent(qbitUrl, user.qbit_username, user.qbit_password);
+
+    const formData = new FormData();
+    formData.append('urls', requestItem.matched_torrent_magnet);
+
+    // Catégorie simple par type (on raffinera plus tard via Admin)
+    const category = requestItem.media_type === 'movie' ? 'Films' : requestItem.media_type === 'anime' ? 'Anime' : 'Séries';
+    formData.append('category', category);
+
+    await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/add`, {
+      method: 'POST',
+      body: formData,
+      headers: {
+        'Cookie': cookies,
+        'Referer': qbitUrl
+      }
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     });
 
     const now = new Date().toISOString();
@@ -1158,7 +1693,11 @@ export async function sendToQbitLibraryItemHandler(req, res) {
       // ignore
     }
 
+<<<<<<< HEAD
     logger.error('Erreur lors de l\'envoi à qBittorrent:', error);
+=======
+    console.error('Erreur lors de l\'envoi à qBittorrent:', error);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     res.status(500).json({ error: message });
   }
 }
@@ -1261,16 +1800,31 @@ export async function createLibraryItemHandler(req, res) {
     const autoOnCreate = !['0', 'false', 'no'].includes(String(process.env.AUTO_SEARCH_ON_CREATE || '').toLowerCase());
     if (autoOnCreate) {
       setTimeout(() => {
+<<<<<<< HEAD
         logger.debug('autosearch', `Trigger onCreate`, { kind: 'media_request', id, media_type });
         autoSearchService
           .runAutoSearchForRequest({ requestId: id, userId: req.user?.id })
           .catch((err) => {
             logger.error(`[AutoSearch][onCreate] Erreur (media_request id=${id}):`, err);
+=======
+        const dbgOnCreate = ['1', 'true', 'yes'].includes(String(process.env.DEBUG_AUTOSEARCH_ON_CREATE || '').toLowerCase());
+        if (dbgOnCreate) {
+          console.log('[AutoSearch][onCreate] Trigger', { kind: 'media_request', id, media_type });
+        }
+        autoSearchService
+          .runAutoSearchForRequest({ requestId: id, userId: req.user?.id })
+          .catch((err) => {
+            console.error(`[AutoSearch][onCreate] Erreur (media_request id=${id}):`, err);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
           });
       }, 0);
     }
   } catch (error) {
+<<<<<<< HEAD
     logger.error('Erreur lors de l\'ajout au suivi:', error);
+=======
+    console.error('Erreur lors de l\'ajout au suivi:', error);
+>>>>>>> 15ec46204cab2ad0a8e3fbb48c9f120c5a8625ed
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
