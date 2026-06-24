@@ -9,6 +9,10 @@ import { get, run } from '../../services/core/db.js';
  */
 export async function getUsersHandler(req, res) {
   try {
+    if (!req.user?.is_admin) {
+      return res.status(403).json({ error: 'Accès réservé aux administrateurs' });
+    }
+
     const users = await userService.getAllUsers();
     res.json(users);
   } catch (error) {
@@ -35,12 +39,17 @@ export async function createUserHandler(req, res) {
       return res.status(409).json({ error: 'Ce nom d\'utilisateur existe déjà' });
     }
     
+    if (is_admin && !req.user?.is_admin) {
+      return res.status(403).json({ error: 'Accès réservé aux administrateurs' });
+    }
+
     // Hashage du mot de passe
     const hashedPassword = await bcrypt.hash(password, 10);
     
     // Génération d'un ID unique
     const userId = randomUUID();
     const now = new Date().toISOString();
+    const adminFlag = req.user?.is_admin && is_admin ? 1 : 0;
     
     // Insertion dans la base de données
     const result = await run(
@@ -50,7 +59,7 @@ export async function createUserHandler(req, res) {
         userId,
         username,
         hashedPassword,
-        is_admin ? 1 : 0,
+        adminFlag,
         now,
         qbit_url || null,
         qbit_username || null,
@@ -240,6 +249,10 @@ export async function updateUserHandler(req, res) {
  */
 export async function deleteUserHandler(req, res) {
   try {
+    if (!req.user?.is_admin) {
+      return res.status(403).json({ error: 'Accès réservé aux administrateurs' });
+    }
+
     const { id } = req.params;
     
     // Vérifier que l'utilisateur existe

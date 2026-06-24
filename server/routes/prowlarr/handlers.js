@@ -5,6 +5,19 @@
 import prowlarrSearchService from '../../services/prowlarr/search.js';
 import { getSetting } from '../../services/settings/index.js';
 import { getResultCompatibility } from '../../services/utils/validation.js';
+import { loadAssignedQualityProfile } from '../../services/utils/helpers.js';
+
+async function withInteractiveProfileCompatibility(results, mediaType) {
+  const profiles = await getSetting('quality_profiles');
+  const assignments = await getSetting('quality_profile_assignments');
+  const profileMediaType = mediaType === 'movie' ? 'movie' : 'tv';
+  const profile = loadAssignedQualityProfile(profileMediaType, profiles, assignments);
+
+  return (results || []).map((r) => ({
+    ...r,
+    ...getResultCompatibility(r, profile, 1, { interactive: true }),
+  }));
+}
 
 /**
  * Recherche un film avec variantes de titre et filtrage par pertinence
@@ -28,7 +41,7 @@ export async function searchMovieHandler(req, res) {
       filterByRelevance: true
     });
 
-    res.json({ results });
+    res.json({ results: await withInteractiveProfileCompatibility(results, 'movie') });
   } catch (error) {
     console.error('Erreur recherche film:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
@@ -79,7 +92,7 @@ export async function searchTvSeriesHandler(req, res) {
       minSeeds
     });
 
-    res.json({ results });
+    res.json({ results: await withInteractiveProfileCompatibility(results, mediaType || 'tv') });
   } catch (error) {
     console.error('Erreur recherche série TV:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });

@@ -13,11 +13,35 @@ import { RequestDetailPage } from './pages/RequestDetailPage';
 import { TvShowRequestPage } from './pages/TvShowRequestPage';
 import { Layout } from './components/core/Layout';
 
-// Intercepteur global pour rediriger vers le login si la session a expiré (HTTP 401)
+// Intercepteur global : déconnexion uniquement si l'API locale renvoie 401 (session expirée)
 const originalFetch = window.fetch;
+
+function isAppApiRequest(input: RequestInfo | URL): boolean {
+  const raw = typeof input === 'string'
+    ? input
+    : input instanceof URL
+      ? input.href
+      : input.url;
+
+  if (raw.startsWith('/api/')) return true;
+
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    return parsed.origin === window.location.origin && parsed.pathname.startsWith('/api/');
+  } catch {
+    return false;
+  }
+}
+
 window.fetch = async (...args) => {
   const response = await originalFetch(...args);
-  if (response.status === 401 && !window.location.pathname.includes('/login')) {
+  const request = args[0];
+
+  if (
+    response.status === 401 &&
+    isAppApiRequest(request) &&
+    !window.location.pathname.includes('/login')
+  ) {
     console.warn('Session expirée (HTTP 401). Déconnexion...');
     useAuthStore.getState().logout();
     window.location.href = '/login';

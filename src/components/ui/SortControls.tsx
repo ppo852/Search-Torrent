@@ -6,12 +6,14 @@ interface SortControlsProps {
   sortOption: SortOption;
   sortDirection: 'asc' | 'desc';
   onSort: (option: SortOption, direction?: 'asc' | 'desc') => void;
+  className?: string;
 }
 
 export function SortControls({
   sortOption,
   sortDirection,
   onSort,
+  className = 'mt-6',
 }: SortControlsProps) {
   const sortButtons = [
     { value: 'name' as SortOption, label: 'Nom' },
@@ -22,7 +24,7 @@ export function SortControls({
   ];
 
   return (
-    <div className="mt-6 flex flex-wrap items-center gap-2">
+    <div className={`flex flex-wrap items-center gap-2 ${className}`}>
       <span className="text-sm text-gray-400 mr-2">Trier par:</span>
       <div className="flex flex-wrap gap-2">
         {sortButtons.map((button) => (

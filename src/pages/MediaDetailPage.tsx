@@ -1,24 +1,30 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { Toast } from '../components/core/Toast';
 import { api } from '../services/api';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Calendar, Star, Tv, Film, BookmarkPlus, HardDrive, Download, Users, X, Sparkles } from 'lucide-react';
-import { useSearchStore } from '../stores/searchStore';
+import { Calendar, Star, Tv, Film, BookmarkPlus, X, Play } from 'lucide-react';
 import { tmdbAPI } from '../services/tmdb/tmdb';
 import { ResultCard } from '../components/ui/ResultCard';
 import { SortControls } from '../components/ui/SortControls';
+import { FilterSelect } from '../components/ui/FilterSelect';
 import type { SearchResult, SortOption, TmdbResult } from '../types';
 import { globalSettings } from '../services/settings';
-import { QualityProfile, QualityProfileAssignments } from '../pages/AdminPage';
-import { useAuthStore } from '../stores/authStore';
-import { formatSize, formatDate } from '../lib/formatters';
 import { ExpandableText } from '../components/ui/ExpandableText';
+import { TrailerModal } from '../components/ui/TrailerModal';
+import { pickBestTrailer, type TmdbVideo } from '../lib/tmdb-videos';
 import { useInteractiveTorrentDownload } from '../hooks/useInteractiveTorrentDownload';
+import {
+  QUALITY_FILTER_OPTIONS,
+  LANGUAGE_FILTER_OPTIONS,
+  matchesQualityFilter,
+  matchesLanguageFilter,
+  type QualityFilter,
+  type LanguageFilter,
+} from '../lib/torrent-filters';
 
 export function MediaDetailPage() {
   const { type, id } = useParams<{ type: string; id: string }>();
   const navigate = useNavigate();
-  const user = useAuthStore((state) => state.user);
   const [media, setMedia] = useState<(TmdbResult & { backdropPath?: string | null }) | null>(null);
   const [isAnime, setIsAnime] = useState(false);
   const [tvSeasons, setTvSeasons] = useState<Array<{ season_number: number; name?: string }>>([]);
@@ -26,25 +32,26 @@ export function MediaDetailPage() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedSeason, setSelectedSeason] = useState<string>('all');
-  const [languageFilterEnabled, setLanguageFilterEnabled] = useState<boolean>(true);
+  const [qualityFilter, setQualityFilter] = useState<QualityFilter>('all');
+  const [languageFilter, setLanguageFilter] = useState<LanguageFilter>('admin');
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [seasonModalOpen, setSeasonModalOpen] = useState(false);
   const [selectedSeasonNumbers, setSelectedSeasonNumbers] = useState<number[]>([]);
-  const [qualityProfiles, setQualityProfiles] = useState<QualityProfile[]>([]);
-  const [qualityAssignments, setQualityAssignments] = useState<QualityProfileAssignments>({
-    movie_profile_id: '',
-    tv_profile_id: ''
-  });
   const itemsPerPage = 25;
   const [results, setResults] = useState<SearchResult[]>([]);
   const [existingSeasonNumbers, setExistingSeasonNumbers] = useState<number[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [trailer, setTrailer] = useState<TmdbVideo | null>(null);
+  const [trailerModalOpen, setTrailerModalOpen] = useState(false);
 
   useEffect(() => {
     const loadMediaDetails = async () => {
       if (!type || !id) return;
+
+      setTrailer(null);
+      setTrailerModalOpen(false);
 
       try {
         if (!globalSettings.getTmdbAccessToken()) {
@@ -83,8 +90,16 @@ export function MediaDetailPage() {
           backdropPath: data.backdrop_path ? `https://image.tmdb.org/t/p/original${data.backdrop_path}` : null,
           type: actualType as 'movie' | 'tv',
           overview: data.overview,
-          voteAverage: data.vote_average
+          voteAverage: data.vote_average,
+          genres: Array.isArray(data.genres)
+            ? data.genres
+                .filter((g: { id?: number; name?: string }) => g?.name)
+                .map((g: { id: number; name: string }) => ({ id: g.id, name: g.name }))
+            : [],
         });
+
+        const videoResults = Array.isArray(data?.videos?.results) ? data.videos.results : [];
+        setTrailer(pickBestTrailer(videoResults));
 
         if (actualType === 'tv' && Array.isArray(data.seasons)) {
           const seasons = data.seasons
@@ -121,39 +136,8 @@ export function MediaDetailPage() {
       }
     };
 
-    const loadQualityProfiles = async () => {
-      try {
-        const settings = user?.is_admin ? await api.getSettings() : await api.getClientSettings();
-        const profilesRaw = Array.isArray((settings as any).quality_profiles) ? (settings as any).quality_profiles : [];
-        const assignments = (settings as any).quality_profile_assignments || null;
-
-        if (Array.isArray(profilesRaw)) {
-          const profiles = profilesRaw.map((p: any) => ({
-            id: String(p?.id || ''),
-            name: String(p?.name || ''),
-            min_size_mb: Number(p?.min_size_mb) || 0,
-            max_size_mb: Number(p?.max_size_mb) || 0,
-            required_keywords: Array.isArray(p?.required_keywords) ? p.required_keywords : [],
-            blocked_keywords: Array.isArray(p?.blocked_keywords) ? p.blocked_keywords : [],
-            sort_by: (p?.sort_by as any) || 'seeds_desc'
-          })).filter(p => p.id);
-          setQualityProfiles(profiles);
-        }
-
-        if (assignments) {
-          setQualityAssignments({
-            movie_profile_id: String(assignments.movie_profile_id || ''),
-            tv_profile_id: String(assignments.tv_profile_id || '')
-          });
-        }
-      } catch (error) {
-        // Fail silently
-      }
-    };
-
     loadMediaDetails();
-    loadQualityProfiles();
-  }, [type, id, user?.is_admin, setResults, setIsLoading, setError]);
+  }, [type, id, setResults, setIsLoading, setError]);
 
   const handleSort = (option: SortOption) => {
     if (option === sortOption) {
@@ -270,21 +254,57 @@ export function MediaDetailPage() {
     if (selectedSeason !== 'all') {
       filtered = filtered.filter(r => extractSeason(r.name) === selectedSeason);
     }
-    if (languageFilterEnabled && media) {
-      const profile = qualityProfiles.find(p => p.id === (media.type === 'movie' ? qualityAssignments.movie_profile_id : qualityAssignments.tv_profile_id));
-      if (profile) {
-        filtered = filtered.filter(r => {
-          const t = r.name.toLowerCase();
-
-          // Keyword filtering only
-          const req = profile.required_keywords.length === 0 || profile.required_keywords.some(k => t.includes(k.toLowerCase()));
-          const blo = profile.blocked_keywords.some(k => t.includes(k.toLowerCase()));
-          return req && !blo;
-        });
-      }
+    if (qualityFilter !== 'all') {
+      filtered = filtered.filter(r => matchesQualityFilter(r.name, qualityFilter));
+    }
+    if (languageFilter === 'admin') {
+      filtered = filtered.filter((r) => r.is_compatible !== false);
+    } else if (languageFilter !== 'all') {
+      filtered = filtered.filter((r) => matchesLanguageFilter(r.name, languageFilter));
     }
     return filtered;
-  }, [results, selectedSeason, languageFilterEnabled, media, qualityProfiles, qualityAssignments]);
+  }, [results, selectedSeason, qualityFilter, languageFilter]);
+
+  const seasonFilterOptions = useMemo(
+    () => [
+      { value: 'all', label: 'Toutes' },
+      ...availableSeasons.map((s) => ({
+        value: s,
+        label: `Saison ${parseInt(s, 10)}`,
+      })),
+    ],
+    [availableSeasons]
+  );
+
+  const handleSourceFilterChange = useCallback((key: 'quality' | 'language' | 'season', value: string) => {
+    if (key === 'quality') setQualityFilter(value as QualityFilter);
+    else if (key === 'language') setLanguageFilter(value as LanguageFilter);
+    else setSelectedSeason(value);
+    setCurrentPage(1);
+  }, []);
+
+  const sourceFilterConfigs = useMemo(() => {
+    const filters: Array<{
+      key: 'quality' | 'language' | 'season';
+      label: string;
+      value: string;
+      options: { value: string; label: string }[];
+    }> = [
+      { key: 'quality', label: 'Qualité', value: qualityFilter, options: QUALITY_FILTER_OPTIONS },
+      { key: 'language', label: 'Langue', value: languageFilter, options: LANGUAGE_FILTER_OPTIONS },
+    ];
+
+    if (media?.type === 'tv' && availableSeasons.length > 0) {
+      filters.push({
+        key: 'season',
+        label: 'Saison',
+        value: selectedSeason,
+        options: seasonFilterOptions,
+      });
+    }
+
+    return filters;
+  }, [qualityFilter, languageFilter, selectedSeason, seasonFilterOptions, media?.type, availableSeasons.length]);
 
   const sortedAndPaginatedResults = useMemo(() => {
     const sorted = [...filteredResults].sort((a, b) => {
@@ -300,6 +320,8 @@ export function MediaDetailPage() {
   }, [filteredResults, sortOption, sortDirection, currentPage]);
 
   if (!media) return null;
+
+  const displayGenres = media.genres?.filter((g) => !(isAnime && g.id === 16)) ?? [];
 
   return (
     <div className="animate-premium-fade relative min-h-screen">
@@ -355,6 +377,19 @@ export function MediaDetailPage() {
               </h2>
             )}
 
+            {displayGenres.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-6">
+                {displayGenres.map((genre) => (
+                  <span
+                    key={genre.id}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border border-white/10 bg-white/5 text-gray-300"
+                  >
+                    {genre.name}
+                  </span>
+                ))}
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center gap-6 mb-8 text-gray-400 font-bold uppercase text-xs tracking-widest">
               {media.releaseDate && (
                 <div className="flex items-center gap-2">
@@ -376,6 +411,16 @@ export function MediaDetailPage() {
             </div>
 
             <div className="flex flex-wrap gap-4">
+              {trailer && (
+                <button
+                  type="button"
+                  onClick={() => setTrailerModalOpen(true)}
+                  className="px-6 py-2.5 bg-white/5 hover:bg-white/10 text-white font-black text-sm flex items-center gap-2 rounded-xl border border-white/10 transition-all tracking-widest hover:scale-[1.02] active:scale-[0.98]"
+                >
+                  <Play size={18} className="text-red-400 fill-red-400" />
+                  BANDE-ANNONCE
+                </button>
+              )}
               <button
                 onClick={handleTrack}
                 className="px-6 py-2.5 premium-gradient text-white font-black text-sm flex items-center gap-2 rounded-xl shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all tracking-widest"
@@ -394,34 +439,25 @@ export function MediaDetailPage() {
               <p className="text-gray-500 font-medium italic text-sm">Les meilleures versions détectées sur les indexeurs</p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 glass p-1.5 rounded-2xl border-white/5">
+            <div className="flex flex-col gap-3 glass p-3 rounded-2xl border-white/5 w-full xl:w-auto">
               <SortControls
                 sortOption={sortOption}
                 sortDirection={sortDirection}
                 onSort={(option) => handleSort(option)}
+                className="mt-0"
               />
 
-              {media?.type === 'tv' && availableSeasons.length > 0 && (
-                <select
-                  value={selectedSeason}
-                  onChange={(e) => setSelectedSeason(e.target.value)}
-                  className="bg-white/5 border border-white/10 text-gray-400 font-bold text-[10px] px-3 py-1.5 rounded-xl focus:outline-none focus:text-white transition-colors uppercase tracking-widest"
-                >
-                  <option value="all">Toutes Saisons</option>
-                  {availableSeasons.map(s => <option key={s} value={s}>Saison {parseInt(s, 10)}</option>)}
-                </select>
-              )}
-
-              <button
-                onClick={() => setLanguageFilterEnabled(!languageFilterEnabled)}
-                className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${languageFilterEnabled
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
-                  : 'bg-white/5 text-gray-500 hover:text-gray-300'
-                  }`}
-              >
-                <Sparkles size={14} />
-                Filtre Langues
-              </button>
+              <div className="flex flex-wrap items-end gap-3">
+                {sourceFilterConfigs.map((filter) => (
+                  <FilterSelect
+                    key={filter.key}
+                    label={filter.label}
+                    value={filter.value}
+                    options={filter.options}
+                    onChange={(value) => handleSourceFilterChange(filter.key, value)}
+                  />
+                ))}
+              </div>
             </div>
           </div>
 
@@ -492,6 +528,12 @@ export function MediaDetailPage() {
         />
       )}
       {confirmModal}
+      <TrailerModal
+        isOpen={trailerModalOpen}
+        video={trailer}
+        title={media ? `Bande-annonce — ${media.title}` : 'Bande-annonce'}
+        onClose={() => setTrailerModalOpen(false)}
+      />
 
       {seasonModalOpen && (
         <div className="fixed inset-0 z-[999] flex justify-end bg-black/40 backdrop-blur-[2px] animate-in fade-in duration-300">

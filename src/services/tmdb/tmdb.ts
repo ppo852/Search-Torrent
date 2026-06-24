@@ -1,3 +1,4 @@
+import { hasPlayableTrailer, type TmdbVideo } from '../../lib/tmdb-videos';
 import { globalSettings } from '../settings';
 
 interface TmdbResult {
@@ -137,13 +138,42 @@ class TmdbAPI {
     return `https://www.themoviedb.org/${type}/${id}`;
   }
 
+  private async fetchVideosRaw(
+    mediaType: 'movie' | 'tv',
+    id: string | number,
+    language?: string
+  ): Promise<{ results: unknown[] }> {
+    const url = new URL(`${this.BASE_URL}/${mediaType}/${id}/videos`);
+    if (language) {
+      url.searchParams.append('language', language);
+    }
+    const response = await fetch(url.toString(), {
+      headers: this.getHeaders(),
+    });
+    if (!response.ok) {
+      return { results: [] };
+    }
+    return response.json();
+  }
+
+  /**
+   * Vidéos TMDB : locale FR d'abord (comme tmdb.org/fr), sinon toutes langues.
+   */
+  private async fetchVideos(mediaType: 'movie' | 'tv', id: string | number): Promise<{ results: unknown[] }> {
+    const fr = await this.fetchVideosRaw(mediaType, id, 'fr-FR');
+    const frResults = Array.isArray(fr?.results) ? fr.results : [];
+    if (hasPlayableTrailer(frResults as TmdbVideo[])) {
+      return fr;
+    }
+    return this.fetchVideosRaw(mediaType, id);
+  }
+
   /**
    * Récupère les détails complets d'un film
    */
   async getMovieDetails(id: string | number): Promise<any> {
     const url = new URL(`${this.BASE_URL}/movie/${id}`);
     url.searchParams.append('language', 'fr-FR');
-    url.searchParams.append('append_to_response', 'credits,videos,recommendations');
 
     const response = await fetch(url.toString(), {
       headers: this.getHeaders()
@@ -153,7 +183,9 @@ class TmdbAPI {
       throw new Error(`TMDB error: ${response.status}`);
     }
 
-    return response.json();
+    const data = await response.json();
+    const videos = await this.fetchVideos('movie', id);
+    return { ...data, videos };
   }
 
   /**
@@ -162,7 +194,6 @@ class TmdbAPI {
   async getTvDetails(id: string | number): Promise<any> {
     const url = new URL(`${this.BASE_URL}/tv/${id}`);
     url.searchParams.append('language', 'fr-FR');
-    url.searchParams.append('append_to_response', 'credits,videos,recommendations');
 
     const response = await fetch(url.toString(), {
       headers: this.getHeaders()
@@ -172,7 +203,9 @@ class TmdbAPI {
       throw new Error(`TMDB error: ${response.status}`);
     }
 
-    return response.json();
+    const data = await response.json();
+    const videos = await this.fetchVideos('tv', id);
+    return { ...data, videos };
   }
 
   /**

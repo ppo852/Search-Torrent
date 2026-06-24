@@ -1,6 +1,6 @@
 // Routes pour la gestion des utilisateurs
 import express from 'express';
-import { authenticateToken } from '../../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 import {
   getUsersHandler,
   createUserHandler,
@@ -16,14 +16,14 @@ const router = express.Router();
  * @desc Récupère la liste de tous les utilisateurs
  * @access Admin
  */
-router.get('/', authenticateToken, getUsersHandler);
+router.get('/', authenticateToken, requireAdmin, getUsersHandler);
 
 /**
  * @route POST /api/users
  * @desc Crée un nouvel utilisateur
  * @access Admin
  */
-router.post('/', authenticateToken, createUserHandler);
+router.post('/', authenticateToken, requireAdmin, createUserHandler);
 
 /**
  * @route GET /api/users/:id
@@ -44,6 +44,6 @@ router.put('/:id', authenticateToken, updateUserHandler);
  * @desc Supprime un utilisateur
  * @access Admin
  */
-router.delete('/:id', authenticateToken, deleteUserHandler);
+router.delete('/:id', authenticateToken, requireAdmin, deleteUserHandler);
 
 export default router;

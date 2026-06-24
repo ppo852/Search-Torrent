@@ -1,6 +1,6 @@
 services:
   search-torrent:
-    image: ppo852/search-torrent:1.6.3
+    image: ppo852/search-torrent:1.6.4
     container_name: search-torrent
     ports:
       - "4000:80"

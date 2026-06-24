@@ -5,13 +5,14 @@
 Interface web moderne pour rechercher, suivre et télécharger vos médias via **Prowlarr** et **qBittorrent**.
 
 [![Docker Hub](https://img.shields.io/badge/Docker-ppo852%2Fsearch--torrent-blue?logo=docker)](https://hub.docker.com/r/ppo852/search-torrent)
-![Version](https://img.shields.io/badge/version-1.6.3-blue)
+![Version](https://img.shields.io/badge/version-1.6.4-blue)
 
 ## Fonctionnalités
 
 - **Accueil immersif** — Tendances TMDB, flux RSS récents, navigation rapide
 - **Recherche multi-catégories** — Films, séries et anime via TMDB ; musique, logiciels/jeux et livres en recherche directe Prowlarr
 - **Demandes & suivi** — Saisons, épisodes, auto-search intelligent
+- **Fiche média** — Filtres résultats, bande-annonce TMDB, profil qualité en recherche interactive
 - **qBittorrent intégré** — Gestion des torrents, catégories normalisées (Films, Séries, Anime, Musique, Logiciels, Jeux, Livres…)
 - **Flux RSS** — Cache optimisé, enrichissement TMDB, catégories détectées automatiquement
 - **Administration** — Utilisateurs, configuration Prowlarr/qBit/TMDB, profils qualité, flux RSS
@@ -115,6 +116,14 @@ Ces deux réglages sont le minimum pour que Search-Torrent puisse assigner une c
 - **Intégrations** — Prowlarr, qBittorrent, TMDB
 
 ## Notes de version
+
+### v1.6.4
+- Filtres page résultats : qualité (480p–4K), langue (profil admin, MULTI, VF, VOSTFR, VO), saison (séries)
+- Recherche interactive : compatibilité profil admin côté serveur (`is_compatible`, mots-clés sans filtre taille)
+- Bande-annonce TMDB sur la fiche média (vidéos locale FR, sélection intelligente, modale embed)
+- Correction déconnexion intempestive : le 401 ne déconnecte plus que les appels `/api/` locaux
+- Sécurité : routes gestion utilisateurs réservées aux administrateurs
+- Nettoyage code mort (`MediaDetailPage`, utilitaires trailer)
 
 ### v1.6.3
 - Recherche Prowlarr par catégorie : musique, logiciels (+ jeux), livres

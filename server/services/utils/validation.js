@@ -5,9 +5,13 @@ import { flattenKeywords, titleContainsAny } from './keywords.js';
  * @param {Object} result - Le résultat Prowlarr
  * @param {Object} profile - Le profil de qualité
  * @param {number} multiplier - Multiplicateur de taille (pour les packs de saison)
+ * @param {Object} options - Options additionnelles
+ * @param {boolean} options.interactive - Recherche interactive : mots-clés uniquement (pas de taille)
  * @returns {Object} { is_compatible: boolean, incompatible_reason: string|null }
  */
-export function getResultCompatibility(result, profile, multiplier = 1) {
+export function getResultCompatibility(result, profile, multiplier = 1, options = {}) {
+  const interactive = options?.interactive === true;
+
   // Check relevance first (if present from search service)
   if (result.is_relevant === false) {
     return { is_compatible: false, incompatible_reason: 'Non pertinent (Titre ne correspond pas exactement)' };
@@ -25,10 +29,10 @@ export function getResultCompatibility(result, profile, multiplier = 1) {
   const blocked = Array.isArray(profile.blocked_keywords) ? profile.blocked_keywords : [];
 
   const size = result?.size || 0;
-  if (minBytes > 0 && size > 0 && size < minBytes) {
+  if (!interactive && minBytes > 0 && size > 0 && size < minBytes) {
     return { is_compatible: false, incompatible_reason: `Taille trop petite (< ${Math.round(minMb)} MB)${mult > 1 ? ' (Pack détecté)' : ''}` };
   }
-  if (maxBytes > 0 && size > 0 && size > maxBytes) {
+  if (!interactive && maxBytes > 0 && size > 0 && size > maxBytes) {
     return { is_compatible: false, incompatible_reason: `Taille trop grande (> ${Math.round(maxMb)} MB)${mult > 1 ? ' (Pack détecté)' : ''}` };
   }
   if (required.length > 0 && !titleContainsAny(result?.name, required)) {
