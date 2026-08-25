@@ -50,12 +50,9 @@ export function isEpisodeTorrentInQbit(torrents, { requestId, episodeNumber, tor
 
 export async function loadQbitTorrentsForUser(userId) {
   try {
-    const { qbitUrl, cookies } = await qBittorrentService.getAuthenticatedQbitConfig(userId);
+    const { qbitUrl, headers } = await qBittorrentService.getAuthenticatedQbitConfig(userId);
     return await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/info`, {
-      headers: {
-        Cookie: cookies,
-        Referer: qbitUrl
-      }
+      headers
     });
   } catch (err) {
     logger.warn('qbit-tags', `Lecture qBit impossible pour user ${userId}:`, err?.message || err);

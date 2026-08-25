@@ -1,0 +1,86 @@
+# Copiez ce fichier en docker-compose.stack.yml (gitignoré) pour une stack locale complète :
+#   cp docker-compose.stack.yml.example docker-compose.stack.yml
+#   docker compose -f docker-compose.stack.yml up -d --build
+#
+# Données : ./test-application/ (gitignoré)
+#   search-torrent/  prowlarr/  qbittorrent/  emby/  downloads/
+#
+# URLs hôte : Search-Torrent :4000 | Prowlarr :9696 | qBit :8080 | Emby :8096
+# URLs Docker internes : http://prowlarr:9696 | http://qbittorrent:8080 | http://emby:8096
+
+services:
+  search-torrent:
+    build: .
+    container_name: st-search-torrent
+    ports:
+      - "4000:80"
+    volumes:
+      - ./test-application/search-torrent:/app/data
+      - ./test-application/downloads:/downloads
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - JWT_SECRET=dev_stack_secret_changez_moi
+      - LOG_LEVEL=debug
+      - DISK_SPACE_PATH=/downloads
+    depends_on:
+      - prowlarr
+      - qbittorrent
+      - emby
+    networks:
+      - st-stack
+    restart: unless-stopped
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: st-prowlarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Paris
+    volumes:
+      - ./test-application/prowlarr:/config
+    ports:
+      - "9696:9696"
+    networks:
+      - st-stack
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: st-qbittorrent
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Paris
+      - WEBUI_PORT=8080
+    volumes:
+      - ./test-application/qbittorrent:/config
+      - ./test-application/downloads:/downloads
+    ports:
+      - "8080:8080"
+      - "6881:6881"
+      - "6881:6881/udp"
+    networks:
+      - st-stack
+    restart: unless-stopped
+
+  emby:
+    image: lscr.io/linuxserver/emby:latest
+    container_name: st-emby
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Paris
+    volumes:
+      - ./test-application/emby:/config
+      - ./test-application/downloads:/data/downloads:ro
+    ports:
+      - "8096:8096"
+    networks:
+      - st-stack
+    restart: unless-stopped
+
+networks:
+  st-stack:
+    driver: bridge

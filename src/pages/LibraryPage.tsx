@@ -1,19 +1,23 @@
 import { useEffect, useState } from 'react';
 import { LayoutGrid, List, Trash2, Search, Clock, User } from 'lucide-react';
-import { api } from '../lib/api';
+import { api } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
+import { getRequestStatusBadge, aggregateSeasonStatuses } from '../lib/request-status-labels';
+import { EmptyState } from '../components/ui/EmptyState';
+import { showErrorToast, showToast } from '../stores/toastStore';
 
 interface LibraryItem {
   id: string;
   user_id: string;
   tmdb_id: number;
-  media_type: 'movie' | 'tv' | 'anime';
+  media_type: 'movie' | 'tv' | 'anime' | 'animation';
   title: string;
   poster_url: string | null;
   release_date: string | null;
   monitored: boolean;
   created_at: string;
+  status?: string;
   requested_by?: string | null;
 }
 
@@ -39,6 +43,8 @@ interface TvShowGroup {
   title: string;
   poster_url: string | null;
   created_at: string;
+  status: string;
+  requested_by?: string | null;
   seasons: TvSeasonRequest[];
 }
 
@@ -56,7 +62,8 @@ export function LibraryPage() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [displayMode, setDisplayMode] = useState<'list' | 'grid'>('grid');
   const [searchText, setSearchText] = useState<string>('');
-  const [categoryFilter, setCategoryFilter] = useState<'all' | 'movie' | 'tv' | 'anime'>('all');
+  const [categoryFilter, setCategoryFilter] = useState<'all' | 'movie' | 'tv' | 'anime' | 'animation'>('all');
+  const [ownerFilter, setOwnerFilter] = useState<'all' | 'mine'>('all');
 
   const load = async () => {
     try {
@@ -87,6 +94,8 @@ export function LibraryPage() {
           title: latest.title,
           poster_url: latest.poster_url,
           created_at: latest.created_at,
+          requested_by: sorted.find((s) => s.requested_by)?.requested_by || null,
+          status: aggregateSeasonStatuses(sorted.map((s) => s.status)),
           seasons: sorted
         };
       });
@@ -119,16 +128,36 @@ export function LibraryPage() {
   const filteredItems = items.filter((item: CombinedRequest) => {
     const query = searchText.trim().toLowerCase();
     if (query && !String(item.title || '').toLowerCase().includes(query)) return false;
-    if (categoryFilter === 'all') return true;
-    return item.media_type === categoryFilter;
+    if (categoryFilter !== 'all' && item.media_type !== categoryFilter) return false;
+
+    if (ownerFilter === 'mine' && user?.username) {
+      if (item.kind === 'media_request') {
+        return item.user_id === user.id || item.requested_by === user.username;
+      }
+      return item.seasons.some((s) => s.user_id === user.id || s.requested_by === user.username);
+    }
+
+    return true;
   });
+
+  const renderStatusBadge = (status?: string) => {
+    const badge = getRequestStatusBadge(status);
+    return (
+      <span className={`inline-block max-w-full px-2 py-0.5 rounded-lg border text-[9px] font-black uppercase tracking-widest truncate ${badge.className}`}>
+        {badge.label}
+      </span>
+    );
+  };
 
   const confirmDelete = async () => {
     if (!pendingDeleteId) return;
     try {
       await api.deleteLibraryItem(pendingDeleteId);
       setItems((prev) => prev.filter((i) => !(i.kind === 'media_request' && i.id === pendingDeleteId)));
-    } catch (e) {}
+      showToast('Retiré du suivi');
+    } catch {
+      showErrorToast('Erreur lors de la suppression');
+    }
     setDeleteModalOpen(false);
     setPendingDeleteId(null);
   };
@@ -170,8 +199,24 @@ export function LibraryPage() {
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center p-1.5 bg-white/5 border border-white/10 rounded-2xl">
              {[
+               { id: 'all', label: 'TOUTES' },
+               { id: 'mine', label: 'MES DEMANDES' }
+             ].map((opt) => (
+               <button
+                 key={opt.id}
+                 onClick={() => setOwnerFilter(opt.id as 'all' | 'mine')}
+                 className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${ownerFilter === opt.id ? 'bg-violet-600 text-white shadow-lg' : 'text-gray-500 hover:text-gray-300'}`}
+               >
+                 {opt.label}
+               </button>
+             ))}
+          </div>
+
+          <div className="flex items-center p-1.5 bg-white/5 border border-white/10 rounded-2xl">
+             {[
                { id: 'all', label: 'TOUT' },
                { id: 'movie', label: 'FILMS' },
+               { id: 'animation', label: 'ANIMATION' },
                { id: 'tv', label: 'SÉRIES' },
                { id: 'anime', label: 'ANIME' }
              ].map(cat => (
@@ -195,9 +240,22 @@ export function LibraryPage() {
       {error && <div className="p-6 bg-red-600/10 border border-red-600/20 rounded-2xl text-red-400 font-bold text-center uppercase tracking-widest text-xs">{error}</div>}
 
       {filteredItems.length === 0 ? (
-        <div className="py-32 glass-card text-center opacity-40">
-          <p className="text-gray-500 font-black uppercase text-xs tracking-widest">Aucune correspondance détectée</p>
-        </div>
+        <EmptyState
+          icon={<Search size={40} />}
+          title={items.length === 0 ? 'Aucune demande active' : 'Aucune correspondance détectée'}
+          description={items.length === 0 ? 'Recherchez un film ou une série pour commencer le suivi.' : 'Modifiez vos filtres pour afficher plus de résultats.'}
+          action={
+            items.length === 0 ? (
+              <button
+                type="button"
+                onClick={() => navigate('/new-torrent')}
+                className="px-6 py-2.5 premium-gradient rounded-xl text-white font-black text-[10px] uppercase tracking-widest shadow-lg shadow-blue-600/20"
+              >
+                Rechercher un média
+              </button>
+            ) : undefined
+          }
+        />
       ) : displayMode === 'grid' ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-8">
           {filteredItems.map((item) => {
@@ -222,15 +280,22 @@ export function LibraryPage() {
                     )}
                     
                     <div className="absolute top-3 left-3 px-2 py-1 bg-black/60 backdrop-blur-md rounded-lg text-[9px] font-black text-white uppercase tracking-[0.2em] border border-white/10 shadow-lg">
-                      {item.media_type === 'movie' ? 'Film' : item.media_type === 'anime' ? 'Anime' : 'Série'}
+                      {item.media_type === 'movie' ? 'Film' : item.media_type === 'animation' ? 'Animation' : item.media_type === 'anime' ? 'Anime' : 'Série'}
+                    </div>
+
+                    <div className="absolute top-3 right-3 max-w-[48%] flex justify-end">
+                      {renderStatusBadge(item.kind === 'media_request' ? item.status : item.status)}
                     </div>
 
                     <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/20 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col justify-end p-5">
                       <h3 className="text-white font-black text-sm leading-tight mb-2 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300 uppercase tracking-tighter">
                         {item.title}
                       </h3>
-                      <div className="flex items-center gap-3 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300 delay-75">
+                      <div className="flex items-center gap-3 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300 delay-75 flex-wrap">
                          <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">{item.kind === 'tv_show_group' ? `${item.seasons.length} SAISONS` : 'SURVEILLÉ'}</span>
+                         {(item.kind === 'media_request' ? item.requested_by : item.requested_by) && (
+                           <span className="text-[10px] font-black text-violet-300 uppercase tracking-widest">{item.requested_by}</span>
+                         )}
                       </div>
                     </div>
                   </div>
@@ -264,11 +329,12 @@ export function LibraryPage() {
               </div>
 
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-4 mb-2">
+                <div className="flex items-center gap-4 mb-2 flex-wrap">
                   <h3 className="text-white font-black text-lg uppercase tracking-tighter truncate">{item.title}</h3>
                   <span className="px-2 py-0.5 bg-blue-600/10 border border-blue-600/20 rounded-lg text-[9px] text-blue-400 uppercase font-black tracking-widest">
                     {item.media_type}
                   </span>
+                  {renderStatusBadge(item.kind === 'media_request' ? item.status : item.status)}
                 </div>
                 
                 <div className="flex flex-wrap items-center gap-x-8 gap-y-2 text-[10px] font-black text-gray-600 uppercase tracking-widest">

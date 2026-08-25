@@ -10,6 +10,30 @@ import {
 import { applyQualityProfile } from '../utils/validation.js';
 import logger from '../core/logger.js';
 
+/**
+ * Sépare titre / année sans vider un titre numérique (ex. "1923", "9101").
+ */
+export function splitQueryTitleAndYear(query) {
+  const trimmed = String(query || '').trim();
+  if (!trimmed) return { title: '', year: '' };
+
+  if (/^\d{4}$/.test(trimmed)) {
+    return { title: trimmed, year: '' };
+  }
+
+  const yearMatch = trimmed.match(/\b(19\d{2}|20\d{2})\b/);
+  const year = yearMatch?.[1] || '';
+  const title = year
+    ? trimmed.replace(/\b(19\d{2}|20\d{2})\b/, '').replace(/\s+/g, ' ').trim()
+    : trimmed;
+
+  if (!title && year) {
+    return { title: trimmed, year: '' };
+  }
+
+  return { title, year };
+}
+
 function extractProwlarrCategoryId(item) {
   const raw = item?.categories ?? item?.category;
   if (raw == null || raw === '') return undefined;
@@ -43,7 +67,9 @@ const PROWLARR_BOOKS_CATEGORY_IDS = '7000,7010,7020,7030,7040,7050';
 const NON_MEDIA_SEARCH_CATEGORIES = new Set(['music', 'software', 'books']);
 
 export function getProwlarrCategoryId(mediaType) {
-  if (mediaType === 'movies' || mediaType === 'movie') return '2000,2010,2020,2030,2040,2045,2050,2060,2070,2080,2090';
+  if (mediaType === 'movies' || mediaType === 'movie' || mediaType === 'animation') {
+    return '2000,2010,2020,2030,2040,2045,2050,2060,2070,2080,2090';
+  }
   if (mediaType === 'tv' || mediaType === 'anime') return PROWLARR_TV_CATEGORY_IDS;
   if (mediaType === 'music') return PROWLARR_MUSIC_CATEGORY_IDS;
   if (mediaType === 'software') return PROWLARR_SOFTWARE_CATEGORY_IDS;
@@ -135,9 +161,18 @@ export function isRelevantResult(torrentName, requestedTitles, year, seasonNumbe
     }
   }
 
-  const yearInNameMatch = n.match(/\b(19\d{2}|20\d{2})\b/);
-  if (year && yearInNameMatch) {
-    if (yearInNameMatch[0] !== String(year)) return false;
+  // Titre = année seule (ex. "1923", "1917", "9101") : ne pas filtrer par année
+  // sinon le titre lui-même est pris pour une année de sortie.
+  const titleIsNumericOnly = titles.some((title) => {
+    const t = normalize(title).replace(/\s+/g, '');
+    return /^\d{4}$/.test(t);
+  });
+
+  if (year && !titleIsNumericOnly) {
+    const yearInNameMatch = n.match(/\b(19\d{2}|20\d{2})\b/);
+    if (yearInNameMatch && yearInNameMatch[0] !== String(year)) {
+      return false;
+    }
   }
 
   const matched = titles.some(title => checkSingleTitleStrict(n, title));

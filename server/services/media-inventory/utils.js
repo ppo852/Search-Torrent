@@ -13,6 +13,14 @@ export function normalizeTitleForDb(value) {
     .replace(/\s+/g, ' ');
 }
 
+/** Année plausible (1900–2100) ou null. */
+export function coerceYear(value) {
+  const y = Number(value);
+  if (!Number.isInteger(y)) return null;
+  if (y < 1900 || y > 2100) return null;
+  return y;
+}
+
 /**
  * Aggressive cleaning: cuts the title at the first occurrence of a technical marker.
  */
@@ -91,6 +99,8 @@ export async function parseTorrentSafe(name) {
     let seasonNum = Number(parsed.season);
     let episodeNum = Number(parsed.episode);
 
+    const hasEpisodeMarker = /\bE(\d{1,4})\b|\bEp(?:isode)?\.?\s*\d|\d{1,2}x\d{1,4}\b/i.test(src);
+
     // Fallback regex for 3/4-digit episodes or other missing season/episode numbers
     if (!Number.isInteger(episodeNum) || episodeNum <= 0) {
       // Try matching SxxExxx (standard or 3/4 digits)
@@ -105,6 +115,21 @@ export async function parseTorrentSafe(name) {
           seasonNum = Number(xMatch[1]);
           episodeNum = Number(xMatch[2]);
         }
+      }
+    }
+
+    // Pack saison : S02 / Season 2 / Saison 2 sans numéro d'épisode
+    if (
+      (!Number.isInteger(seasonNum) || seasonNum <= 0) &&
+      !hasEpisodeMarker &&
+      !(Number.isInteger(episodeNum) && episodeNum > 0)
+    ) {
+      const seasonOnly =
+        src.match(/\bS(?:aison|eason)?\.?\s*(\d{1,2})(?!\d)/i) ||
+        src.match(/\bSaison\s*(\d{1,2})\b/i) ||
+        src.match(/\bSeason\s*(\d{1,2})\b/i);
+      if (seasonOnly) {
+        seasonNum = Number(seasonOnly[1]);
       }
     }
 

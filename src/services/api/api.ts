@@ -1,11 +1,32 @@
 import { useAuthStore } from '../../stores/authStore';
-import { getCategoryLabel, resolveQbitCategory } from '../../lib/categories';
+import { getCategoryLabel, normalizeQbitCategory, resolveQbitCategory } from '../../lib/categories';
+
+export interface TvSeasonStatusRow {
+  season_number: number;
+  present_episodes: number[];
+  present_count: number;
+  expected_count: number;
+  still_airing?: boolean;
+  complete: boolean;
+  partial: boolean;
+  in_library: boolean;
+  requested: boolean;
+  request_status: string | null;
+}
 
 class API {
   private getHeaders() {
     const token = useAuthStore.getState().token;
     return {
       'Content-Type': 'application/json',
+      'Authorization': token ? `Bearer ${token}` : '',
+    };
+  }
+
+  /** Auth seule (FormData : ne pas forcer Content-Type) */
+  private getAuthHeaders() {
+    const token = useAuthStore.getState().token;
+    return {
       'Authorization': token ? `Bearer ${token}` : '',
     };
   }
@@ -130,15 +151,6 @@ class API {
     return response.json();
   }
 
-  async getClientSettings() {
-    const response = await fetch('/api/settings/client', {
-      headers: this.getHeaders(),
-    });
-
-    await this.handleResponse(response);
-    return response.json();
-  }
-
   async updateSettings(settings: any) {
     const response = await fetch('/api/settings/global', {
       method: 'PUT',
@@ -159,14 +171,16 @@ class API {
     return response.json();
   }
 
-  async deleteTorrents(hashes: string[], deleteFiles: boolean = false) {
+  async deleteTorrents(hashes: string[] | string, deleteFiles: boolean = false) {
+    const hashList = Array.isArray(hashes) ? hashes : [hashes];
     const response = await fetch('/api/qbittorrent/delete', {
       method: 'DELETE',
       headers: this.getHeaders(),
-      body: JSON.stringify({ hashes, deleteFiles })
+      body: JSON.stringify({ hashes: hashList, deleteFiles })
     });
 
-    return this.handleResponse(response);
+    await this.handleResponse(response);
+    return response.json().catch(() => ({}));
   }
 
   async reannounceTrackers(hash: string) {
@@ -189,6 +203,31 @@ class API {
     return this.handleResponse(response);
   }
 
+  async exportTorrentFile(hash: string, name?: string) {
+    const params = new URLSearchParams({ hash });
+    if (name) params.set('name', name);
+    const response = await fetch(`/api/qbittorrent/export?${params.toString()}`, {
+      headers: this.getHeaders(),
+    });
+
+    await this.handleResponse(response);
+    const blob = await response.blob();
+    const safe =
+      (name || hash)
+        .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+        .replace(/\.torrent$/i, '')
+        .trim()
+        .slice(0, 120) || hash;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${safe}.torrent`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   async pauseTorrent(hash: string) {
     const response = await fetch('/api/qbittorrent/pause', {
       method: 'POST',
@@ -196,7 +235,8 @@ class API {
       body: JSON.stringify({ hashes: hash })
     });
 
-    return this.handleResponse(response);
+    await this.handleResponse(response);
+    return response.json().catch(() => ({}));
   }
 
   async resumeTorrent(hash: string) {
@@ -206,10 +246,70 @@ class API {
       body: JSON.stringify({ hashes: hash })
     });
 
-    return this.handleResponse(response);
+    await this.handleResponse(response);
+    return response.json().catch(() => ({}));
   }
 
-  async addTorrentUrl(url: string, options: { name?: string, category?: string, mediaType?: 'movie' | 'tv' | 'anime' | 'music' | 'books', tags?: string[], force?: boolean } = {}) {
+  async getQbitMainData(rid = 0) {
+    const response = await fetch(`/api/qbittorrent/sync/maindata?rid=${rid}`, {
+      headers: this.getHeaders(),
+    });
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async getQbitCategories() {
+    const response = await fetch('/api/qbittorrent/categories', {
+      headers: this.getHeaders(),
+    });
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async createQbitCategory(category: string) {
+    const response = await fetch('/api/qbittorrent/createCategory', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ category }),
+    });
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async addTorrentForm(options: {
+    files?: File[];
+    magnet?: string;
+    category?: string;
+    tags?: string;
+  }) {
+    const formData = new FormData();
+    for (const file of options.files || []) {
+      formData.append('torrents', file);
+    }
+    if (options.magnet) formData.append('magnet', options.magnet);
+    if (options.category) formData.append('category', options.category);
+    if (options.tags) formData.append('tags', options.tags);
+
+    const response = await fetch('/api/qbittorrent/add', {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: formData,
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async addTorrentUrl(url: string, options: {
+    name?: string;
+    category?: string;
+    mediaType?: 'movie' | 'tv' | 'anime' | 'animation' | 'music' | 'books';
+    tags?: string[];
+    force?: boolean;
+    tmdbId?: number;
+    seasonNumber?: number;
+    episodeNumber?: number;
+  } = {}) {
     const category = (options.category || options.mediaType)
       ? resolveQbitCategory(options.category, options.mediaType) ?? undefined
       : undefined;
@@ -221,6 +321,10 @@ class API {
         urls: [url],
         name: options.name,
         force: !!options.force,
+        tmdb_id: options.tmdbId || undefined,
+        mediaType: options.mediaType || undefined,
+        season_number: options.seasonNumber || undefined,
+        episode_number: options.episodeNumber || undefined,
         options: {
           ...(category ? { category } : {}),
           tags: options.tags?.join(',')
@@ -233,23 +337,25 @@ class API {
 
   /**
    * Ajoute un torrent avec catégorisation automatique
-   * @param url URL du torrent à ajouter
-   * @param itemCategory Catégorie fournie par les résultats de recherche
-   * @param mediaType Type de média (film ou série) si disponible
-   * @returns Réponse de l'API qBittorrent
    */
   async addTorrentWithCategory(
     url: string,
     name?: string,
     itemCategory?: string,
     categoryId?: number,
-    mediaType?: 'movie' | 'tv' | 'anime' | 'music' | 'books',
+    mediaType?: 'movie' | 'tv' | 'anime' | 'animation' | 'music' | 'books',
     tags?: string[],
     force?: boolean,
-    searchContext?: 'software'
+    searchContext?: 'software',
+    tmdbId?: number,
+    seasonNumber?: number,
+    episodeNumber?: number
   ) {
-    const category = getCategoryLabel(categoryId, itemCategory, name, mediaType, searchContext);
-    return this.addTorrentUrl(url, { name, category, tags, force });
+    // Catégorie UI déjà canonique (ex. RSS « Animation ») prime sur tmdbType « movie »
+    const category =
+      normalizeQbitCategory(itemCategory) ||
+      getCategoryLabel(categoryId, itemCategory, name, mediaType, searchContext);
+    return this.addTorrentUrl(url, { name, category, tags, force, mediaType, tmdbId, seasonNumber, episodeNumber });
   }
 
   async addTorrentFile(file: File, options: { category?: string; tags?: string[] } = {}) {
@@ -257,26 +363,11 @@ class API {
       throw new Error('Le fichier doit être un .torrent');
     }
 
-    const formData = new FormData();
-    formData.append('fileselect', file);
-
-    if (options.category) {
-      formData.append('category', options.category);
-    }
-
-    if (options.tags && options.tags.length > 0) {
-      formData.append('tags', options.tags.join(','));
-    }
-
-    const response = await fetch('/api/qbittorrent/add', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-      },
-      body: formData
+    return this.addTorrentForm({
+      files: [file],
+      category: options.category,
+      tags: options.tags?.join(','),
     });
-
-    return this.handleResponse(response);
   }
 
   async getLibrary() {
@@ -290,7 +381,7 @@ class API {
 
   async addLibraryItem(payload: {
     tmdb_id: number;
-    media_type: 'movie' | 'tv';
+    media_type: 'movie' | 'tv' | 'anime' | 'animation';
     title: string;
     poster_url?: string | null;
     release_date?: string | null;
@@ -383,6 +474,30 @@ class API {
 
     await this.handleResponse(response);
     return response.json();
+  }
+
+  async getTvShowSeasonStatus(
+    tmdbId: number,
+    options: {
+      mediaType?: 'tv' | 'anime';
+      title?: string;
+      seasons?: number[];
+    } = {}
+  ) {
+    const params = new URLSearchParams();
+    params.set('mediaType', options.mediaType || 'tv');
+    if (options.title) params.set('title', options.title);
+    if (options.seasons?.length) {
+      params.set('seasons', options.seasons.join(','));
+    }
+
+    const response = await fetch(
+      `/api/library/tv/show/${tmdbId}/season-status?${params.toString()}`,
+      { headers: this.getHeaders() }
+    );
+
+    await this.handleResponse(response);
+    return response.json() as Promise<{ seasons: TvSeasonStatusRow[] }>;
   }
 
   async createTvSeasonRequests(payload: {
@@ -506,22 +621,76 @@ class API {
     return response.json();
   }
 
-  async searchMovie(title: string, year?: string, tmdbId?: number) {
-    const response = await fetch('/api/prowlarr/search/movie', {
+  async testEmbyConnection(payload?: { url?: string; api_key?: string }) {
+    const response = await fetch('/api/emby/test', {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify({ title, year, tmdbId })
+      body: JSON.stringify(payload || {})
     });
 
     await this.handleResponse(response);
     return response.json();
   }
 
-  async searchTvEpisode(title: string, seasonNumber: number, episodeNumber: number, mediaType?: string, tmdbId?: number) {
-    const response = await fetch('/api/prowlarr/search/tv/episode', {
+  async testProwlarrConnection(payload?: { url?: string; api_key?: string }) {
+    const response = await fetch('/api/prowlarr/test', {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify({ title, seasonNumber, episodeNumber, mediaType, tmdbId })
+      body: JSON.stringify(payload || {})
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async testTmdbConnection(payload?: { access_token?: string }) {
+    const response = await fetch('/api/tmdb/test', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(payload || {})
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async getEmbyLibraries(options?: { url?: string; api_key?: string }) {
+    const params = new URLSearchParams();
+    if (options?.url) params.set('url', options.url);
+    if (options?.api_key) params.set('api_key', options.api_key);
+    const qs = params.toString();
+    const response = await fetch(`/api/emby/libraries${qs ? `?${qs}` : ''}`, {
+      headers: this.getHeaders()
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async getEmbyStatus() {
+    const response = await fetch('/api/emby/status', {
+      headers: this.getHeaders()
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async syncEmbyNow() {
+    const response = await fetch('/api/emby/sync', {
+      method: 'POST',
+      headers: this.getHeaders()
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async searchMovie(title: string, year?: string, tmdbId?: number, mediaType?: 'movie' | 'animation') {
+    const response = await fetch('/api/prowlarr/search/movie', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ title, year, tmdbId, mediaType })
     });
 
     await this.handleResponse(response);
@@ -548,6 +717,119 @@ class API {
 
     await this.handleResponse(response);
     return response.json();
+  }
+
+  async getSystemHealth() {
+    const response = await fetch('/api/system/health', {
+      headers: this.getHeaders()
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async getAdminActivity(limit = 100, eventType?: string) {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (eventType) params.set('event_type', eventType);
+
+    const response = await fetch(`/api/admin/activity?${params.toString()}`, {
+      headers: this.getHeaders()
+    });
+
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async downloadDatabaseBackup(): Promise<void> {
+    const response = await fetch('/api/system/backup/database', {
+      headers: this.getHeaders()
+    });
+
+    if (response.status === 401) {
+      useAuthStore.getState().logout();
+      window.location.href = '/login';
+      throw new Error('Session expirée. Veuillez vous reconnecter.');
+    }
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      throw new Error(errorBody.error || 'Erreur lors du téléchargement');
+    }
+
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="([^"]+)"/);
+    const filename = match?.[1] || `search-torrent-backup-${new Date().toISOString().slice(0, 10)}.sqlite`;
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  // --- RSS ---
+  async getRssFeeds() {
+    const response = await fetch('/api/rss', { headers: this.getHeaders() });
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async getAllRssItems(forceRefresh = false) {
+    const query = forceRefresh ? '?force_refresh=true' : '';
+    const response = await fetch(`/api/rss/all-items${query}`, {
+      headers: this.getHeaders(),
+    });
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async getRssRecentHome(hours = 72) {
+    const response = await fetch(`/api/rss/recent-home?hours=${hours}`, {
+      headers: this.getHeaders(),
+    });
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async createRssFeed(payload: { feed_name: string; feed_url: string }) {
+    const response = await fetch('/api/rss', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(payload),
+    });
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async deleteRssFeed(id: string) {
+    const response = await fetch(`/api/rss/${id}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    });
+    await this.handleResponse(response);
+    return response.json().catch(() => ({}));
+  }
+
+  async getRssCacheStats() {
+    const response = await fetch('/api/rss/cache/stats', {
+      headers: this.getHeaders(),
+    });
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  async manageRssCache(payload: { action: string; type: string; feedId?: string }) {
+    const response = await fetch('/api/rss/cache/manage', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(payload),
+    });
+    await this.handleResponse(response);
+    return response.json().catch(() => ({}));
   }
 }
 

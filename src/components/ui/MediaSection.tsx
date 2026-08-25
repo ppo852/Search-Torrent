@@ -2,14 +2,16 @@ import { useRef } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { MediaCard } from './MediaCard';
 import type { TmdbResult } from '../../types';
+import type { PosterBadge } from '../../lib/poster-badge';
 
 interface MediaSectionProps {
   title: string;
   items: TmdbResult[];
   onMediaClick: (media: TmdbResult) => void;
+  getPosterBadges?: (media: TmdbResult) => PosterBadge | PosterBadge[] | null | undefined;
 }
 
-export function MediaSection({ title, items, onMediaClick }: MediaSectionProps) {
+export function MediaSection({ title, items, onMediaClick, getPosterBadges }: MediaSectionProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const scroll = (direction: 'left' | 'right') => {
@@ -45,6 +47,7 @@ export function MediaSection({ title, items, onMediaClick }: MediaSectionProps) 
               key={`${media.type}-${media.id}`}
               media={media}
               onClick={onMediaClick}
+              posterBadge={getPosterBadges?.(media) || null}
             />
           ))}
         </div>

@@ -197,17 +197,22 @@ async function scanRoots(roots, kind, existingMap) {
 /**
  * Ingest a single video file without scanning entire library trees.
  */
-export async function ingestSingleFile(filePath, { moviesPath, seriesPath, animePath }) {
+export async function ingestSingleFile(filePath, { moviesPath, seriesPath, animePath, animationPath }) {
   if (!isVideoFilePath(filePath)) return null;
 
   const normPath = normalizePath(filePath);
   const moviesRoots = splitRoots(moviesPath);
   const seriesRoots = splitRoots(seriesPath);
   const animeRoots = splitRoots(animePath);
+  const animationRoots = splitRoots(animationPath);
 
   let root = findRootForFile(normPath, moviesRoots);
   let kind = 'movie';
 
+  if (!root) {
+    root = findRootForFile(normPath, animationRoots);
+    kind = 'movie';
+  }
   if (!root) {
     root = findRootForFile(normPath, seriesRoots);
     kind = 'tv';
@@ -236,20 +241,32 @@ export async function ingestSingleFile(filePath, { moviesPath, seriesPath, anime
   return record;
 }
 
-export async function scanAndSync({ moviesPath, seriesPath, animePath }) {
+export async function scanAndSync({ moviesPath, seriesPath, animePath, animationPath }) {
   try {
     const moviesRoots = String(moviesPath || '').split(':').map(p => p.trim()).filter(Boolean);
     const seriesRoots = String(seriesPath || '').split(':').map(p => p.trim()).filter(Boolean);
     const animeRoots = String(animePath || '').split(':').map(p => p.trim()).filter(Boolean);
+    const animationRoots = String(animationPath || '').split(':').map(p => p.trim()).filter(Boolean);
 
     const existingRecordsMap = await getAllRecordsByPath();
     
     const moviesData = await scanRoots(moviesRoots, 'movie', existingRecordsMap);
+    const animationData = await scanRoots(animationRoots, 'movie', existingRecordsMap);
     const seriesData = await scanRoots(seriesRoots, 'tv', existingRecordsMap);
     const animeData = await scanRoots(animeRoots, 'tv', existingRecordsMap);
 
-    const allItems = [...moviesData.results, ...seriesData.results, ...animeData.results];
-    const allKeep = [...moviesData.keep, ...seriesData.keep, ...animeData.keep];
+    const allItems = [
+      ...moviesData.results,
+      ...animationData.results,
+      ...seriesData.results,
+      ...animeData.results,
+    ];
+    const allKeep = [
+      ...moviesData.keep,
+      ...animationData.keep,
+      ...seriesData.keep,
+      ...animeData.keep,
+    ];
 
     await upsertMany(allItems);
     await deleteMissingPaths(allKeep);
@@ -257,6 +274,7 @@ export async function scanAndSync({ moviesPath, seriesPath, animePath }) {
     return {
       scanned: allItems.length,
       movies_paths: moviesRoots,
+      animation_paths: animationRoots,
       series_paths: seriesRoots,
       anime_paths: animeRoots
     };

@@ -1,9 +1,6 @@
 import { create } from 'zustand';
-import { api } from '../lib/api';
-import { QueryClient } from '@tanstack/react-query';
-
-// Créer une instance de QueryClient pour l'utiliser dans le store
-const queryClient = new QueryClient();
+import { api } from '../services/api';
+import { queryClient } from '../lib/queryClient';
 
 interface User {
   id: string;
@@ -11,7 +8,7 @@ interface User {
   is_admin: boolean;
   allow_force_interactive_download?: boolean;
   qbit_url?: string;
-  qbit_username?: string;
+  last_seen_app_version?: string | null;
 }
 
 interface AuthState {
@@ -33,24 +30,22 @@ export const useAuthStore = create<AuthState>((set) => ({
   login: async (username: string, password: string) => {
     try {
       const response = await api.login(username, password);
-      
+
       if (!response) {
         return false;
       }
 
       const { token, user } = response;
-      
-      // Invalider le cache avant la connexion
+
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['rss-feeds'] }),
-        queryClient.invalidateQueries({ queryKey: ['rss-items'] })
+        queryClient.invalidateQueries({ queryKey: ['rss-items'] }),
+        queryClient.invalidateQueries({ queryKey: ['library', 'request-status'] }),
       ]);
-      
-      // Sauvegarder dans le localStorage
+
       localStorage.setItem('auth_token', token);
       localStorage.setItem('user', JSON.stringify(user));
 
-      // Mettre à jour le store
       set({
         token,
         user: {
@@ -59,27 +54,25 @@ export const useAuthStore = create<AuthState>((set) => ({
           is_admin: user.is_admin,
           allow_force_interactive_download: !!user.allow_force_interactive_download,
           qbit_url: user.qbit_url,
-          qbit_username: user.qbit_username,
-        }
+          last_seen_app_version: user.last_seen_app_version ?? null,
+        },
       });
 
       return true;
     } catch (error) {
-      "console.error('Erreur lors de la connexion:', error);"
+      console.error('Erreur lors de la connexion:', error);
       return false;
     }
   },
 
   logout: () => {
-    // Invalider le cache
     queryClient.invalidateQueries({ queryKey: ['rss-feeds'] });
     queryClient.invalidateQueries({ queryKey: ['rss-items'] });
-    
-    // Nettoyer le localStorage
+    queryClient.removeQueries({ queryKey: ['library', 'request-status'] });
+
     localStorage.removeItem('auth_token');
     localStorage.removeItem('user');
-    
-    // Réinitialiser le store
+
     set({ user: null, token: null });
   },
 

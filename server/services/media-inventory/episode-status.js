@@ -1,4 +1,4 @@
-import { query, run } from '../core/db.js';
+import { query } from '../core/db.js';
 import mediaInventoryService from './index.js';
 import { getSetting } from '../settings/index.js';
 import logger from '../core/logger.js';
@@ -7,6 +7,8 @@ import {
   loadQbitTorrentsForUser
 } from '../tv-season/qbit-tags.js';
 import { insertTvSeasonHistory, markTvEpisodeCompleted, markTvEpisodeError } from '../tv-season/downloads.js';
+import { tryMarkCompletedTvSeasons } from '../tv-season/completion.js';
+import { markMediaRequestCompleted, purgeCompletedRequests } from '../library/cleanup.js';
 
 const DEFAULT_STALE_DOWNLOAD_MS = 60 * 60 * 1000;
 
@@ -124,7 +126,7 @@ export async function reconcileStaleTvEpisodeDownloads(options = {}) {
 export async function updateDownloadingEpisodesStatus() {
   try {
     logger.debug('inventory', 'Vérification des épisodes en téléchargement...');
-    
+
     const downloadingEpisodes = await query(
       `SELECT d.tv_season_request_id, d.episode_number, r.title, r.season_number, r.tmdb_id
        FROM tv_episode_downloads d
@@ -132,45 +134,52 @@ export async function updateDownloadingEpisodesStatus() {
        WHERE d.status = 'downloading'`
     );
 
-    if (!downloadingEpisodes || downloadingEpisodes.length === 0) {
-      logger.debug('inventory', 'Aucun épisode en statut "downloading"');
-      return 0;
-    }
-    
-    logger.debug('inventory', `${downloadingEpisodes.length} épisode(s) en téléchargement à vérifier`);
-
-    let updatedCount = 0;
     const now = new Date().toISOString();
+    let updatedCount = 0;
+    const touchedSeasonIds = new Set();
 
-    for (const ep of downloadingEpisodes) {
-      // eslint-disable-next-line no-await-in-loop
-      const present = await mediaInventoryService.isPresent({
-        kind: 'tv',
-        title: ep.title,
-        season: ep.season_number,
-        episode: ep.episode_number,
-        tmdb_id: ep.tmdb_id
-      });
+    if (downloadingEpisodes?.length) {
+      logger.debug('inventory', `${downloadingEpisodes.length} épisode(s) en téléchargement à vérifier`);
 
-      logger.debug('inventory', `Check "${ep.title}" S${ep.season_number}E${ep.episode_number} => present=${present?.present}`);
-
-      if (present?.present) {
+      for (const ep of downloadingEpisodes) {
+        touchedSeasonIds.add(ep.tv_season_request_id);
         // eslint-disable-next-line no-await-in-loop
-        await markTvEpisodeCompleted({
-          requestId: ep.tv_season_request_id,
-          episodeNumber: ep.episode_number,
-          completedAt: now
+        const present = await mediaInventoryService.isPresent({
+          kind: 'tv',
+          title: ep.title,
+          season: ep.season_number,
+          episode: ep.episode_number,
+          tmdb_id: ep.tmdb_id
         });
-        updatedCount++;
+
+        logger.debug('inventory', `Check "${ep.title}" S${ep.season_number}E${ep.episode_number} => present=${present?.present}`);
+
+        if (present?.present) {
+          // eslint-disable-next-line no-await-in-loop
+          await markTvEpisodeCompleted({
+            requestId: ep.tv_season_request_id,
+            episodeNumber: ep.episode_number,
+            completedAt: now
+          });
+          updatedCount++;
+        }
       }
+    } else {
+      logger.debug('inventory', 'Aucun épisode en statut "downloading"');
     }
 
-    // Also update movie requests status and auto-delete completed ones
     try {
+      if (touchedSeasonIds.size > 0) {
+        const seasonsCompleted = await tryMarkCompletedTvSeasons(Array.from(touchedSeasonIds), now);
+        if (seasonsCompleted > 0) {
+          logger.debug('inventory', `${seasonsCompleted} saison(s) passée(s) en 'completed'`);
+        }
+      }
+
       const movieRequests = await query(
-        `SELECT id, user_id, tmdb_id, title, release_date, status, completed_at
+        `SELECT id, user_id, tmdb_id, title, release_date, status, completed_at, media_type
          FROM media_requests
-         WHERE media_type = 'movie' AND status NOT IN ('completed')`
+         WHERE media_type IN ('movie', 'animation') AND status NOT IN ('completed')`
       );
 
       let completedMarked = 0;
@@ -186,30 +195,14 @@ export async function updateDownloadingEpisodesStatus() {
 
         if (presentMovie?.present) {
           // eslint-disable-next-line no-await-in-loop
-          await run(
-            `UPDATE media_requests
-             SET status = 'completed', completed_at = COALESCE(completed_at, ?), last_checked_at = ?, last_error = ?
-             WHERE id = ?`,
-            [now, now, null, mr.id]
-          );
+          await markMediaRequestCompleted(mr.id, now);
           completedMarked++;
         }
       }
 
       const hoursSetting = await getSetting('media_requests_auto_delete_completed_after_hours');
       const hours = typeof hoursSetting === 'number' && Number.isFinite(hoursSetting) && hoursSetting >= 0 ? hoursSetting : 24;
-      if (hours === 0) {
-        // immediate cleanup
-        await run(`DELETE FROM media_requests WHERE status = 'completed'`);
-      } else {
-        const cutoffMs = Date.now() - hours * 60 * 60 * 1000;
-        const cutoffIso = new Date(cutoffMs).toISOString();
-        await run(
-          `DELETE FROM media_requests
-           WHERE status = 'completed' AND completed_at IS NOT NULL AND completed_at < ?`,
-          [cutoffIso]
-        );
-      }
+      await purgeCompletedRequests(hours);
 
       if (completedMarked > 0) {
         logger.debug('inventory', `${completedMarked} film(s) passé(s) en 'completed'`);

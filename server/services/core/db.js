@@ -3,6 +3,22 @@ import config from './config.js';
 
 const db = new sqlite3.Database(config.paths.db);
 
+/** File d’attente : une section critique DB à la fois (évite BEGIN imbriqués). */
+let exclusiveChain = Promise.resolve();
+
+/**
+ * Exécute fn sans qu’une autre withDbExclusive tourne en parallèle.
+ * Obligatoire autour de BEGIN…COMMIT et des gros lots d’écriture.
+ */
+export function withDbExclusive(fn) {
+  const runExclusive = exclusiveChain.then(() => fn());
+  exclusiveChain = runExclusive.then(
+    () => undefined,
+    () => undefined
+  );
+  return runExclusive;
+}
+
 /**
  * Ferme proprement la base de données
  */

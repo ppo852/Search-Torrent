@@ -6,17 +6,21 @@ import prowlarrSearchService, { isCompleteSeasonTitle } from '../prowlarr/search
 import { applyQualityProfile } from '../utils/validation.js';
 import {
   pad2,
-  loadAssignedQualityProfile
+  loadAssignedQualityProfile,
+  isMovieLikeMediaType
 } from '../utils/helpers.js';
 import {
-  getSeasonEpisodesWithAirDates
+  getSeasonEpisodesWithAirDates,
+  isEpisodeAiredNow,
 } from '../tmdb/episodes.js';
 import { reconcileStaleTvEpisodeDownloads } from '../media-inventory/episode-status.js';
+import { logActivity } from '../activity-log/index.js';
 import {
   buildQbitTagsString,
   findQbitTorrentByTags,
   loadQbitTorrentsForUser
 } from '../tv-season/qbit-tags.js';
+import { tryMarkTvSeasonCompleted } from '../tv-season/completion.js';
 import {
   insertTvSeasonHistory,
   markTvEpisodeCompleted,
@@ -90,8 +94,7 @@ export async function runAutoSearchForTvSeasonEpisodeRequest({ requestId, userId
       }
     }
 
-    const airMs = tmdbEpisode.airDate ? new Date(tmdbEpisode.airDate).getTime() : null;
-    if (airMs && airMs > Date.now()) {
+    if (!isEpisodeAiredNow(tmdbEpisode.airDate)) {
       await run(`UPDATE tv_season_requests SET status = ?, next_episode_number = ?, last_checked_at = ?, last_error = ? WHERE id = ? AND user_id = ?`, ['monitoring', epNum, now, null, requestId, userId]);
       return { status: 'not_aired', episode: epNum };
     }
@@ -147,6 +150,12 @@ export async function runAutoSearchForTvSeasonEpisodeRequest({ requestId, userId
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erreur serveur';
     await run(`UPDATE tv_season_requests SET status = ?, last_checked_at = ?, last_error = ? WHERE id = ? AND user_id = ?`, ['error', now, message, requestId, userId]);
+    await logActivity({
+      eventType: 'auto_search.error',
+      actorUsername: null,
+      targetLabel: `TV request ${requestId}`,
+      details: { message, requestId, episode: epNum },
+    });
     return { status: 'error', error: message, episode: epNum };
   }
 }
@@ -159,7 +168,7 @@ export async function runAutoSearchForRequest({ requestId, userId }) {
   const now = new Date().toISOString();
   try {
     const year = requestItem.release_date ? Number(String(requestItem.release_date).split('-')[0]) : null;
-    const present = await mediaInventoryService.isPresent({ kind: requestItem.media_type === 'movie' ? 'movie' : 'tv', title: requestItem.title, year: year, tmdb_id: requestItem.tmdb_id });
+    const present = await mediaInventoryService.isPresent({ kind: isMovieLikeMediaType(requestItem.media_type) ? 'movie' : 'tv', title: requestItem.title, year: year, tmdb_id: requestItem.tmdb_id });
 
     if (present?.present) {
       await run(`UPDATE media_requests SET status = ?, last_checked_at = ?, last_error = ? WHERE id = ? AND user_id = ?`, ['already_available', now, null, requestId, userId]);
@@ -191,6 +200,12 @@ export async function runAutoSearchForRequest({ requestId, userId }) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erreur serveur';
     await run(`UPDATE media_requests SET status = ?, last_checked_at = ?, last_error = ? WHERE id = ? AND user_id = ?`, ['error', now, message, requestId, userId]);
+    await logActivity({
+      eventType: 'auto_search.error',
+      actorUsername: null,
+      targetLabel: requestItem?.title || requestId,
+      details: { message, requestId, kind: 'movie' },
+    });
     return { status: 'error', error: message };
   }
 }
@@ -227,29 +242,41 @@ export async function runAutoSearchForTvSeasonRequest({ requestId, userId, recon
       }
       if (alreadyDownloading.has(ep.episodeNumber)) { downloadingEpisodes.push(ep.episodeNumber); continue; }
 
-      const airMs = ep.airDate ? new Date(ep.airDate).getTime() : null;
-      if (!airMs || airMs <= Date.now()) missingEpisodes.push(ep.episodeNumber);
+      if (isEpisodeAiredNow(ep.airDate)) missingEpisodes.push(ep.episodeNumber);
     }
 
     if (missingEpisodes.length === 0) {
-      if (presentSet.size === allEpisodes.length) await run(`UPDATE tv_season_requests SET status = 'completed', last_checked_at = ? WHERE id = ? AND user_id = ?`, [now, requestId, userId]);
-      return { status: presentSet.size === allEpisodes.length ? 'completed_season' : 'not_aired' };
+      const completed = await tryMarkTvSeasonCompleted(
+        {
+          id: requestId,
+          user_id: userId,
+          tmdb_id: requestItem.tmdb_id,
+          title: requestItem.title,
+          season_number: requestItem.season_number
+        },
+        now
+      );
+      return { status: completed ? 'completed_season' : 'not_aired' };
     }
 
     const { minSeeds, profile, qbitCategory } = await getAutoSearchContext(requestItem.media_type);
     const hasErrorRetry = missingEpisodes.some((ep) => errorEpisodes.has(ep));
     let qbitTorrents = null;
+    const hasPartialPresence = presentSet.size > 0;
 
-    const packResults = await prowlarrSearchService.searchTvSeries({
-      title: requestItem.title,
-      tmdbId: requestItem.tmdb_id,
-      mediaType: requestItem.media_type,
-      seasonNumber: requestItem.season_number,
-      minSeeds,
-      qualityProfile: profile,
-      episodeCount: allEpisodes.length
-    });
-    const bestPack = packResults.filter(r => isCompleteSeasonTitle(r.name))[0];
+    let bestPack = null;
+    if (!hasPartialPresence) {
+      const packResults = await prowlarrSearchService.searchTvSeries({
+        title: requestItem.title,
+        tmdbId: requestItem.tmdb_id,
+        mediaType: requestItem.media_type,
+        seasonNumber: requestItem.season_number,
+        minSeeds,
+        qualityProfile: profile,
+        episodeCount: allEpisodes.length
+      });
+      bestPack = packResults.filter(r => isCompleteSeasonTitle(r.name))[0];
+    }
 
     if (bestPack) {
       if (hasErrorRetry) {
@@ -307,6 +334,11 @@ export async function runAutoSearchForTvSeasonRequest({ requestId, userId, recon
         [nextEp, bestPack.name, bestPack.link, bestPack.size, bestPack.seeds, now, null, requestId, userId]
       );
       return { status: 'sent_season_pack', selected: bestPack };
+    } else if (hasPartialPresence) {
+      logger.info(
+        `[AutoSearch] Pack saison ignoré pour "${requestItem.title}" S${requestItem.season_number} `
+        + `(${presentSet.size} épisode(s) déjà présent(s), ${missingEpisodes.length} manquant(s)) — recherche individuelle`
+      );
     }
 
     // Individual search
@@ -380,6 +412,12 @@ export async function runAutoSearchForTvSeasonRequest({ requestId, userId, recon
   } catch (error) {
     logger.error(`[AutoSearch] Erreur critique lors du scan de "${requestItem?.title || requestId}" S${requestItem?.season_number}:`, error);
     await run(`UPDATE tv_season_requests SET status = 'error', last_checked_at = ?, last_error = ? WHERE id = ? AND user_id = ?`, [now, error.message, requestId, userId]);
+    await logActivity({
+      eventType: 'auto_search.error',
+      actorUsername: null,
+      targetLabel: requestItem?.title ? `${requestItem.title} S${requestItem.season_number}` : requestId,
+      details: { message: error.message, requestId, kind: 'tv_season' },
+    });
     return { status: 'error', error: error.message };
   }
 }

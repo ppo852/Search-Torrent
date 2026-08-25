@@ -1,31 +1,74 @@
 /**
- * Formate une taille en octets en format lisible (Ko, Mo, Go, etc.)
- * @param bytes - Taille en octets
- * @returns Taille formatée avec unité
+ * Fonctions de formatage partagées (UI).
  */
-export const formatSize = (bytes: number) => {
-    if (bytes === 0) return '0 o';
-    const sizes = ['o', 'Ko', 'Mo', 'Go', 'To'];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${sizes[i]}`;
+
+/**
+ * Formate une taille en octets (Ko, Mo, Go, etc.)
+ */
+export const formatSize = (bytes: number): string => {
+  if (!bytes || bytes === 0) return '0 o';
+
+  const units = ['o', 'Ko', 'Mo', 'Go', 'To'];
+  let size = bytes;
+  let unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex++;
+  }
+
+  return `${size.toFixed(2)} ${units[unitIndex]}`;
 };
 
 /**
- * Formate une vitesse en octets/seconde en format lisible (Ko/s, Mo/s, etc.)
- * @param speed - Vitesse en octets par seconde
- * @returns Vitesse formatée avec unité
+ * Formate une vitesse en octets/seconde
  */
-export const formatSpeed = (speed: number) => {
-    const sizes = ['o/s', 'Ko/s', 'Mo/s', 'Go/s', 'To/s'];
-    if (speed === 0) return '0 o/s';
-    const i = Math.floor(Math.log(speed) / Math.log(1024));
-    return `${(speed / Math.pow(1024, i)).toFixed(2)} ${sizes[i]}`;
+export const formatSpeed = (speed: number): string => {
+  if (!speed || speed === 0) return '0 o/s';
+
+  const units = ['o/s', 'Ko/s', 'Mo/s', 'Go/s', 'To/s'];
+  let value = speed;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
+  }
+
+  return `${value.toFixed(2)} ${units[unitIndex]}`;
 };
 
 /**
- * Formate un ratio avec une couleur selon sa valeur
- * @param ratio - Ratio à formater
- * @returns Objet contenant le texte formaté et la classe de couleur
+ * Formate une date : ISO/string/Date, ou timestamp Unix (secondes) si number.
+ */
+export const formatDate = (date: string | Date | number): string => {
+  if (date === null || date === undefined || date === '') return 'Date inconnue';
+
+  if (typeof date === 'number') {
+    const dateObj = new Date(date * 1000);
+    return new Intl.DateTimeFormat('fr-FR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(dateObj);
+  }
+
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
+  if (Number.isNaN(dateObj.getTime())) return 'Date inconnue';
+
+  return dateObj.toLocaleString('fr-FR', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
+
+/**
+ * Formate un ratio avec une classe de couleur Tailwind
  */
 export const formatRatioWithColor = (ratio: number): { text: string; color: string } => {
   const value = ratio.toFixed(2);
@@ -36,25 +79,7 @@ export const formatRatioWithColor = (ratio: number): { text: string; color: stri
 };
 
 /**
- * Formate un timestamp Unix en date lisible
- * @param timestamp - Timestamp Unix en secondes
- * @returns Date formatée
- */
-export const formatDate = (timestamp: number): string => {
-  const date = new Date(timestamp * 1000);
-  return new Intl.DateTimeFormat('fr-FR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(date);
-};
-
-/**
- * Extrait l'année d'une date au format ISO (YYYY-MM-DD)
- * @param date - Date au format ISO
- * @returns Année extraite ou chaîne vide si date invalide
+ * Extrait l'année d'une date ISO (YYYY-MM-DD)
  */
 export const formatYear = (date: string): string => {
   if (!date) return '';

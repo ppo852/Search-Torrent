@@ -1,4 +1,4 @@
-import { hasPlayableTrailer, type TmdbVideo } from '../../lib/tmdb-videos';
+import { useAuthStore } from '../../stores/authStore';
 import { globalSettings } from '../settings';
 
 interface TmdbResult {
@@ -14,14 +14,36 @@ interface TmdbResult {
 }
 
 class TmdbAPI {
-  readonly BASE_URL = 'https://api.themoviedb.org/3';
-
-  getHeaders() {
-    const token = globalSettings.getTmdbAccessToken();
+  private getAuthHeaders() {
+    const token = useAuthStore.getState().token;
     return {
-      'Authorization': `Bearer ${token}`,
+      Authorization: token ? `Bearer ${token}` : '',
       'Content-Type': 'application/json'
     };
+  }
+
+  private async apiGet(path: string): Promise<any> {
+    const response = await fetch(`/api/tmdb${path}`, {
+      headers: this.getAuthHeaders()
+    });
+
+    if (!response.ok) {
+      throw new Error(`TMDB API error: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  private async ensureConfigured(): Promise<boolean> {
+    if (globalSettings.isTmdbConfigured()) {
+      return true;
+    }
+    try {
+      await globalSettings.load();
+    } catch {
+      return false;
+    }
+    return globalSettings.isTmdbConfigured();
   }
 
   private cleanTitle(title: string): string {
@@ -29,29 +51,19 @@ class TmdbAPI {
     const year = yearMatch ? yearMatch[0] : '';
 
     let q = title
-      // Remove IMDB/TVDB/TMDB ID annotations like {imdb-tt...} or [tmdbid-...]
       .replace(/\{imdb-[^\}]+\}/gi, '')
       .replace(/\[tvdbid-[^\]]+\]/gi, '')
       .replace(/\{tmdb-[^\}]+\}/gi, '')
       .replace(/\[tmdbid-[^\]]+\]/gi, '')
-      // Remove year in parentheses and everything after: (1989)...
       .replace(/\(\d{4}\).*$/, '')
-      // Remove year with separators and everything after: .1989-... or -1989. or _1989_
       .replace(/[._-]\d{4}[._-].*$/, '')
-      // Remove standalone year at end with separator: .1989 or -1989 or _1989
       .replace(/[._-]\d{4}$/, '')
-      // Remove common quality indicators and everything after
       .replace(/[._-](480p|720p|1080p|2160p|4k).*$/i, '')
       .replace(/[._-](bluray|brrip|webrip|web-dl|webdl|hdtv|dvdrip).*$/i, '')
-      // Remove codec info and everything after
       .replace(/[._-](x264|x265|h264|h265|hevc|xvid|divx|avc).*$/i, '')
-      // Remove release group tags (usually at the end like -RARBG, -YTS, etc.)
       .replace(/-[A-Z0-9]+$/, '')
-      // Replace separators with spaces
       .replace(/[._+\-]+/g, ' ')
-      // Collapse multiple spaces
       .replace(/\s+/g, ' ')
-      // Trim whitespace
       .trim();
 
     if (year && q && !q.includes(year)) {
@@ -62,178 +74,53 @@ class TmdbAPI {
   }
 
   async searchMultipleTypes(query: string, mediaType: 'movie' | 'tv' | 'all' = 'all'): Promise<TmdbResult[]> {
-    if (!globalSettings.getTmdbAccessToken()) {
+    if (!(await this.ensureConfigured())) {
       return [];
     }
 
     const cleanedTitle = this.cleanTitle(query);
 
-
     try {
       return await this.searchWithTitle(cleanedTitle, query, mediaType);
-    } catch (error) {
-
+    } catch {
       return [];
     }
   }
 
-  async searchWithTitle(query: string, originalQuery: string, mediaType: 'movie' | 'tv' | 'all' = 'all'): Promise<TmdbResult[]> {
-    // Determine if likely an anime for better search
-    const isAnime = /anime|アニメ/.test(originalQuery.toLowerCase());
-
-    // Déterminer quels types de médias rechercher en fonction du paramètre mediaType
-    const types: Array<'movie' | 'tv'> = mediaType === 'all' ? ['movie', 'tv'] : [mediaType];
-    const results: TmdbResult[] = [];
-
-    for (const type of types) {
-      try {
-        const url = new URL(`${this.BASE_URL}/search/${type}`);
-        url.searchParams.append('query', query);
-        url.searchParams.append('language', 'fr-FR');
-        url.searchParams.append('include_adult', 'false');
-
-        // Pour les animes, on ajoute le filtre du genre animation
-        if (isAnime) {
-          url.searchParams.append('with_genres', '16');
-        }
-
-        const response = await fetch(url.toString(), {
-          headers: this.getHeaders()
-        });
-
-        if (!response.ok) {
-          throw new Error(`TMDB API error: ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        data.results.forEach((item: any) => {
-          // Déterminer le type réel du média (important pour la recherche 'multi')
-          const actualType = type === 'multi' ? item.media_type : type;
-          
-          // On ignore ce qui n'est ni un film ni une série (ex: les fiches d'acteurs)
-          if (actualType !== 'movie' && actualType !== 'tv') return;
-
-          results.push({
-            id: item.id,
-            title: actualType === 'movie' ? item.title : item.name,
-            originalTitle: actualType === 'movie' ? item.original_title : item.original_name,
-            releaseDate: actualType === 'movie' ? item.release_date : item.first_air_date,
-            posterPath: item.poster_path ? `https://image.tmdb.org/t/p/w185${item.poster_path}` : null,
-            type: actualType as 'movie' | 'tv',
-            overview: item.overview,
-            voteAverage: item.vote_average,
-            genres: item.genre_ids ? item.genre_ids.map((id: number) => ({ id, name: '' })) : []
-          });
-        });
-      } catch (error) {
-      }
-    }
-
-    // Trier par popularité (vote_average)
-    return results.sort((a, b) => b.voteAverage - a.voteAverage);
+  async searchWithTitle(
+    query: string,
+    originalQuery: string,
+    mediaType: 'movie' | 'tv' | 'all' = 'all'
+  ): Promise<TmdbResult[]> {
+    const params = new URLSearchParams({
+      q: query,
+      mediaType,
+      originalQuery
+    });
+    return this.apiGet(`/search?${params.toString()}`);
   }
 
   getTmdbUrl(id: number, type: 'movie' | 'tv'): string {
     return `https://www.themoviedb.org/${type}/${id}`;
   }
 
-  private async fetchVideosRaw(
-    mediaType: 'movie' | 'tv',
-    id: string | number,
-    language?: string
-  ): Promise<{ results: unknown[] }> {
-    const url = new URL(`${this.BASE_URL}/${mediaType}/${id}/videos`);
-    if (language) {
-      url.searchParams.append('language', language);
-    }
-    const response = await fetch(url.toString(), {
-      headers: this.getHeaders(),
-    });
-    if (!response.ok) {
-      return { results: [] };
-    }
-    return response.json();
-  }
-
-  /**
-   * Vidéos TMDB : locale FR d'abord (comme tmdb.org/fr), sinon toutes langues.
-   */
-  private async fetchVideos(mediaType: 'movie' | 'tv', id: string | number): Promise<{ results: unknown[] }> {
-    const fr = await this.fetchVideosRaw(mediaType, id, 'fr-FR');
-    const frResults = Array.isArray(fr?.results) ? fr.results : [];
-    if (hasPlayableTrailer(frResults as TmdbVideo[])) {
-      return fr;
-    }
-    return this.fetchVideosRaw(mediaType, id);
-  }
-
-  /**
-   * Récupère les détails complets d'un film
-   */
   async getMovieDetails(id: string | number): Promise<any> {
-    const url = new URL(`${this.BASE_URL}/movie/${id}`);
-    url.searchParams.append('language', 'fr-FR');
-
-    const response = await fetch(url.toString(), {
-      headers: this.getHeaders()
-    });
-
-    if (!response.ok) {
-      throw new Error(`TMDB error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const videos = await this.fetchVideos('movie', id);
-    return { ...data, videos };
+    return this.apiGet(`/movie/${id}`);
   }
 
-  /**
-   * Récupère les détails complets d'une série TV
-   */
   async getTvDetails(id: string | number): Promise<any> {
-    const url = new URL(`${this.BASE_URL}/tv/${id}`);
-    url.searchParams.append('language', 'fr-FR');
-
-    const response = await fetch(url.toString(), {
-      headers: this.getHeaders()
-    });
-
-    if (!response.ok) {
-      throw new Error(`TMDB error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const videos = await this.fetchVideos('tv', id);
-    return { ...data, videos };
+    return this.apiGet(`/tv/${id}`);
   }
 
-  /**
-   * Récupère les détails d'une saison spécifique d'une série TV
-   */
   async getTvSeasonDetails(id: string | number, seasonNumber: number): Promise<any> {
-    const url = new URL(`${this.BASE_URL}/tv/${id}/season/${seasonNumber}`);
-    url.searchParams.append('language', 'fr-FR');
-
-    const response = await fetch(url.toString(), {
-      headers: this.getHeaders()
-    });
-
-    if (!response.ok) {
-      throw new Error(`TMDB error: ${response.status}`);
-    }
-
-    return response.json();
+    return this.apiGet(`/tv/${id}/season/${seasonNumber}`);
   }
 
-  /**
-   * Alias pour searchMultipleTypes pour maintenir la compatibilité avec SearchPage.tsx
-   * @param query Requête de recherche
-   * @param mediaType Type de média (film, série ou les deux)
-   * @param isAnime Indique si la recherche concerne des animes
-   */
-  async searchSuggestions(query: string, mediaType: 'movie' | 'tv' | 'all' = 'all', _isAnime: boolean = false): Promise<TmdbResult[]> {
-    // Simplement appeler searchMultipleTypes qui a la même fonctionnalité
+  async searchSuggestions(
+    query: string,
+    mediaType: 'movie' | 'tv' | 'all' = 'all',
+    _isAnime: boolean = false
+  ): Promise<TmdbResult[]> {
     return this.searchMultipleTypes(query, mediaType);
   }
 }

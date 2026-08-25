@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { api } from '../services/api';
 
 interface UseTorrentUploadReturn {
   isModalOpen: boolean;
@@ -28,7 +29,6 @@ export const useTorrentUpload = (onSuccess?: () => void): UseTorrentUploadReturn
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  // Ouvrir la modal d'ajout
   const openModal = () => {
     setIsModalOpen(true);
     setMagnetLink('');
@@ -38,7 +38,6 @@ export const useTorrentUpload = (onSuccess?: () => void): UseTorrentUploadReturn
     setUploadError(null);
   };
 
-  // Fermer la modal d'ajout
   const closeModal = () => {
     setIsModalOpen(false);
     setMagnetLink('');
@@ -48,7 +47,6 @@ export const useTorrentUpload = (onSuccess?: () => void): UseTorrentUploadReturn
     setUploadError(null);
   };
 
-  // Gérer un tableau de fichiers (input ou drag & drop)
   const handleFiles = (files: FileList | File[]) => {
     if (files && files.length > 0) {
       setTorrentFiles(Array.from(files));
@@ -56,90 +54,51 @@ export const useTorrentUpload = (onSuccess?: () => void): UseTorrentUploadReturn
     }
   };
 
-  // Gérer le changement de fichiers torrent (multiple)
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       handleFiles(e.target.files);
     }
   };
 
-  // Gérer le changement de lien magnet
   const onMagnetChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setMagnetLink(e.target.value);
-    setTorrentFiles([]); // Réinitialiser les fichiers si un lien magnet est saisi
+    setTorrentFiles([]);
   };
 
-  // Gérer le changement de catégorie
   const onCategoryChange = (category: string) => {
     setSelectedCategory(category);
   };
 
-  // Ajouter un torrent
   const addTorrent = useCallback(async () => {
-    // console.log('torrentFiles:', torrentFiles);
     try {
       setIsUploading(true);
       setUploadError(null);
 
-      // Vérification déplacée au début
       if (!magnetLink && torrentFiles.length === 0) {
         setUploadError('Veuillez fournir un lien magnet ou un fichier torrent');
-        setIsUploading(false); // Important : arrêter le chargement
-        return; // Important : sortir de la fonction
+        setIsUploading(false);
+        return;
       }
-      
-      // Vérification de la catégorie
+
       if (!selectedCategory) {
         setUploadError('Veuillez sélectionner une catégorie');
         setIsUploading(false);
         return;
       }
 
-      const formData = new FormData();
-      torrentFiles.forEach((file: File) => {
-        formData.append('torrents', file);
-      });
-      if (magnetLink) {
-        formData.append('magnet', magnetLink);
-      }
-      if (selectedCategory) {
-        formData.append('category', selectedCategory);
-      }
-      if (tags) {
-        formData.append('tags', tags);
-      }
-
-      // Utilisation de fetch natif pour l'upload
-      const response = await fetch('/api/qbittorrent/add', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-          // Ne pas définir Content-Type ici, le navigateur le gère pour FormData
-        },
-        body: formData
+      await api.addTorrentForm({
+        files: torrentFiles,
+        magnet: magnetLink || undefined,
+        category: selectedCategory,
+        tags: tags || undefined,
       });
 
-      let data: any = null;
-      let rawText = '';
-      try {
-        rawText = await response.text();
-        data = JSON.parse(rawText);
-      } catch (jsonErr) {
-        console.error('Réponse non JSON lors de l\'upload:', rawText);
-        setUploadError("Erreur inattendue du serveur (réponse non JSON). Détail : " + rawText.slice(0, 200));
-        return;
-      }
-      if (response.ok) {
-        // Réinitialiser le formulaire et fermer la modal
-        setMagnetLink('');
-        setTorrentFiles([]);
-        setSelectedCategory('');
-        setTags('');
-        closeModal();
-        if (onSuccess) onSuccess();
-      } else {
-        setUploadError(data.error || "Erreur lors de l'upload.");
-      }
+      setMagnetLink('');
+      setTorrentFiles([]);
+      setSelectedCategory('');
+      setTags('');
+      closeModal();
+      if (onSuccess) onSuccess();
     } catch (error: any) {
       console.error("Erreur lors de l'upload:", error);
       setUploadError(error?.message || "Erreur lors de l'upload.");
@@ -148,30 +107,13 @@ export const useTorrentUpload = (onSuccess?: () => void): UseTorrentUploadReturn
     }
   }, [onSuccess, torrentFiles, magnetLink, selectedCategory, tags]);
 
-  // Fonction pour créer une nouvelle catégorie
   const createCategory = useCallback(async (category: string) => {
     if (!category.trim()) return null;
-    
-    try {
-      const response = await fetch('/api/qbittorrent/createCategory', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-        },
-        body: JSON.stringify({ category: category.trim() })
-      });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Erreur lors de la création de la catégorie');
-      }
-      
-      // Définir automatiquement la catégorie créée comme sélectionnée
+    try {
+      await api.createQbitCategory(category.trim());
       const newCategory = category.trim();
       setSelectedCategory(newCategory);
-      
-      // Retourner la nouvelle catégorie pour que le composant parent puisse mettre à jour sa liste
       return newCategory;
     } catch (error) {
       console.error('Erreur lors de la création de la catégorie:', error);
@@ -180,7 +122,6 @@ export const useTorrentUpload = (onSuccess?: () => void): UseTorrentUploadReturn
     }
   }, []);
 
-  // Fonction pour gérer le changement de tags
   const onTagsChange = useCallback((value: string) => {
     setTags(value);
   }, []);

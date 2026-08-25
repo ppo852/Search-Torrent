@@ -1,5 +1,6 @@
 // Gestionnaires de routes pour l'authentification
 import authService from '../../services/auth/index.js';
+import { logActivity } from '../../services/activity-log/index.js';
 
 /**
  * Gère la connexion d'un utilisateur
@@ -17,10 +18,21 @@ export async function loginHandler(req, res) {
     const result = await authService.authenticateUser(username, password);
     
     if (!result) {
+      await logActivity({
+        eventType: 'auth.login_failed',
+        actorUsername: username,
+        targetLabel: username,
+      });
       return res.status(401).json({ error: 'Nom d\'utilisateur ou mot de passe incorrect' });
     }
     
     const { user, token } = result;
+
+    await logActivity({
+      eventType: 'auth.login_success',
+      actorUsername: user.username,
+      targetLabel: user.username,
+    });
     
     // Log pour le debugging
     console.log('📤 Envoi des données au client:', {
@@ -30,7 +42,6 @@ export async function loginHandler(req, res) {
         username: user.username,
         is_admin: user.is_admin,
         qbit_url: user.qbit_url,
-        qbit_username: user.qbit_username,
         created_at: user.created_at
       }
     });
@@ -44,8 +55,8 @@ export async function loginHandler(req, res) {
         is_admin: user.is_admin,
         allow_force_interactive_download: !!user.allow_force_interactive_download,
         qbit_url: user.qbit_url,
-        qbit_username: user.qbit_username,
-        created_at: user.created_at
+        created_at: user.created_at,
+        last_seen_app_version: user.last_seen_app_version || null
       }
     });
   } catch (error) {

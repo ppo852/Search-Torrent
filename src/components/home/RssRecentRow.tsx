@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuthStore } from '../../stores/authStore';
 import { formatYear } from '../../utils/formatters';
+import { api } from '../../services/api';
 
 const RSS_HOME_HOURS = 72;
 
@@ -19,13 +20,14 @@ interface HomeRssItem {
 
 interface RecentHomeResponse {
   films: HomeRssItem[];
+  animations: HomeRssItem[];
   series: HomeRssItem[];
   anime: HomeRssItem[];
   hours: number;
 }
 
 interface TrackerSectionConfig {
-  key: 'films' | 'series' | 'anime';
+  key: 'films' | 'animations' | 'series' | 'anime';
   title: string;
   accentBarClass: string;
   mediaType: 'movie' | 'tv';
@@ -41,6 +43,14 @@ const SECTIONS: TrackerSectionConfig[] = [
     mediaType: 'movie',
     loadingLabel: 'Chargement des nouveaux films...',
     errorLabel: 'Impossible de charger les nouveaux films',
+  },
+  {
+    key: 'animations',
+    title: 'Nouvelles animations à télécharger',
+    accentBarClass: 'before:bg-gradient-to-b before:from-violet-500 before:to-purple-600',
+    mediaType: 'movie',
+    loadingLabel: 'Chargement des nouvelles animations...',
+    errorLabel: 'Impossible de charger les nouvelles animations',
   },
   {
     key: 'series',
@@ -60,21 +70,11 @@ const SECTIONS: TrackerSectionConfig[] = [
   },
 ];
 
-async function fetchRecentHome(token: string): Promise<RecentHomeResponse> {
-  const response = await fetch(`/api/rss/recent-home?hours=${RSS_HOME_HOURS}`, {
-    headers: {
-      Authorization: token ? `Bearer ${token}` : '',
-    },
-  });
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(text || 'Erreur lors du chargement des médias trackers');
-  }
-
-  const data = await response.json();
+async function fetchRecentHome(): Promise<RecentHomeResponse> {
+  const data = await api.getRssRecentHome(RSS_HOME_HOURS);
   return {
     films: data.films || [],
+    animations: data.animations || [],
     series: data.series || [],
     anime: data.anime || [],
     hours: data.hours ?? RSS_HOME_HOURS,
@@ -215,7 +215,7 @@ export function RssTrackerHome() {
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['rss', 'recent-home', RSS_HOME_HOURS],
-    queryFn: () => fetchRecentHome(token || ''),
+    queryFn: () => fetchRecentHome(),
     enabled: !!token,
     staleTime: 15 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
@@ -227,6 +227,7 @@ export function RssTrackerHome() {
     isLoading ||
     isError ||
     (data?.films?.length ?? 0) > 0 ||
+    (data?.animations?.length ?? 0) > 0 ||
     (data?.series?.length ?? 0) > 0 ||
     (data?.anime?.length ?? 0) > 0;
 
@@ -254,6 +255,3 @@ export function RssTrackerHome() {
     </>
   );
 }
-
-/** @deprecated Utiliser RssTrackerHome */
-export const RssRecentRow = RssTrackerHome;

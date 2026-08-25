@@ -1,6 +1,11 @@
 import { useState, useMemo } from 'react';
 import { Torrent, TorrentStatus } from '../types/qbittorrent';
-import { isTorrentError } from '../utils/torrentUtils';
+import { isTorrentError, getTrackerName } from '../utils/torrentUtils';
+
+export interface TrackerOption {
+  name: string;
+  count: number;
+}
 
 interface UseTorrentFiltersProps {
   torrents: Torrent[];
@@ -14,6 +19,9 @@ interface UseTorrentFiltersResult {
   setCurrentStatus: (status: TorrentStatus) => void;
   currentCategory: string;
   setCurrentCategory: (category: string) => void;
+  currentTracker: string;
+  setCurrentTracker: (tracker: string) => void;
+  trackers: TrackerOption[];
   categories: string[];
 }
 
@@ -21,8 +29,8 @@ export const useTorrentFilters = ({ torrents }: UseTorrentFiltersProps): UseTorr
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [currentStatus, setCurrentStatus] = useState<TorrentStatus>('all');
   const [currentCategory, setCurrentCategory] = useState<string>('');
+  const [currentTracker, setCurrentTracker] = useState<string>('');
 
-  // Extraire les catégories uniques des torrents
   const categories = useMemo(() => {
     const uniqueCategories = new Set<string>();
     torrents.forEach(torrent => {
@@ -33,7 +41,18 @@ export const useTorrentFilters = ({ torrents }: UseTorrentFiltersProps): UseTorr
     return Array.from(uniqueCategories).sort();
   }, [torrents]);
 
-  // Filtrer les torrents en fonction des critères
+  const trackers = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const torrent of torrents) {
+      if (!torrent.tracker) continue;
+      const name = getTrackerName(torrent.tracker);
+      counts.set(name, (counts.get(name) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  }, [torrents]);
+
   const filteredTorrents = useMemo(() => {
     return torrents.filter(torrent => {
       // Filtre par recherche
@@ -65,9 +84,12 @@ export const useTorrentFilters = ({ torrents }: UseTorrentFiltersProps): UseTorr
       // Filtre par catégorie
       const matchesCategory = currentCategory === '' || torrent.category === currentCategory;
 
-      return matchesSearch && matchesStatus && matchesCategory;
+      const matchesTracker = currentTracker === ''
+        || (torrent.tracker && getTrackerName(torrent.tracker) === currentTracker);
+
+      return matchesSearch && matchesStatus && matchesCategory && matchesTracker;
     });
-  }, [torrents, searchQuery, currentStatus, currentCategory]);
+  }, [torrents, searchQuery, currentStatus, currentCategory, currentTracker]);
 
   return {
     filteredTorrents,
@@ -77,6 +99,9 @@ export const useTorrentFilters = ({ torrents }: UseTorrentFiltersProps): UseTorr
     setCurrentStatus,
     currentCategory,
     setCurrentCategory,
+    currentTracker,
+    setCurrentTracker,
+    trackers,
     categories
   };
 };

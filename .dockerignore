@@ -9,4 +9,14 @@ TASKS.md
 *.log
 data
 screenshots
+tests
 .gemini
+
+# Compose personnels / locaux (pas dans l'image)
+docker-compose.*.yml
+docker-compose.override.yml
+docker-compose.dev.yml
+docker-compose.stack.yml
+docker-compose.production.yml
+docker-compose.test.yml
+test-application

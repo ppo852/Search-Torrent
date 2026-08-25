@@ -1,7 +1,6 @@
 // Service de gestion des utilisateurs
 import bcrypt from 'bcryptjs';
 import db, { get, run, query } from '../core/db.js';
-import admin from './admin.js';
 import logger from '../core/logger.js';
 
 /**
@@ -25,15 +24,18 @@ export async function verifyCredentials(username, password) {
       return null;
     }
     
-    // Ne pas retourner le mot de passe dans l'objet utilisateur
-    const { password: _, ...userWithoutPassword } = user;
+    // Ne pas retourner les secrets dans l'objet utilisateur
+    const hasQbitApiKey = !!(user.qbit_api_key && String(user.qbit_api_key).trim());
+    const { password: _, qbit_api_key: __, ...userWithoutSecrets } = user;
     
     logger.info(`Login successful for user: ${username}`);
     
     return {
-      ...userWithoutPassword,
-      is_admin: !!userWithoutPassword.is_admin,
-      allow_force_interactive_download: !!userWithoutPassword.allow_force_interactive_download
+      ...userWithoutSecrets,
+      has_qbit_api_key: hasQbitApiKey,
+      is_admin: !!userWithoutSecrets.is_admin,
+      allow_force_interactive_download: !!userWithoutSecrets.allow_force_interactive_download,
+      last_seen_app_version: userWithoutSecrets.last_seen_app_version || null
     };
   } catch (error) {
     logger.error('Erreur lors de la vérification des identifiants:', error);
@@ -51,8 +53,10 @@ export async function getUserById(userId) {
     // Utiliser la fonction get importée, pas la méthode de l'objet db
     const user = await get(
       `SELECT id, username, is_admin, created_at, 
-       qbit_url, qbit_username, download_path_movies, download_path_series, download_path_anime,
-       allow_force_interactive_download FROM users WHERE id = ?`,
+       qbit_url, download_path_movies, download_path_series, download_path_anime, download_path_animation,
+       allow_force_interactive_download, last_seen_app_version,
+       (CASE WHEN qbit_api_key IS NOT NULL AND trim(qbit_api_key) != '' THEN 1 ELSE 0 END) AS has_qbit_api_key
+       FROM users WHERE id = ?`,
       [userId]
     );
     
@@ -61,7 +65,9 @@ export async function getUserById(userId) {
     return {
       ...user,
       is_admin: !!user.is_admin,
-      allow_force_interactive_download: !!user.allow_force_interactive_download
+      allow_force_interactive_download: !!user.allow_force_interactive_download,
+      has_qbit_api_key: !!user.has_qbit_api_key,
+      last_seen_app_version: user.last_seen_app_version || null
     };
   } catch (error) {
     logger.error('Erreur lors de la récupération de l\'utilisateur:', error);
@@ -77,13 +83,16 @@ export async function getAllUsers() {
   try {
     const users = await query(
       `SELECT id, username, is_admin, created_at, 
-       qbit_url, qbit_username, download_path_movies, download_path_series, download_path_anime,
-       allow_force_interactive_download FROM users`
+       qbit_url, download_path_movies, download_path_series, download_path_anime, download_path_animation,
+       allow_force_interactive_download,
+       (CASE WHEN qbit_api_key IS NOT NULL AND trim(qbit_api_key) != '' THEN 1 ELSE 0 END) AS has_qbit_api_key
+       FROM users`
     );
     return (users || []).map(u => ({
       ...u,
       is_admin: !!u.is_admin,
-      allow_force_interactive_download: !!u.allow_force_interactive_download
+      allow_force_interactive_download: !!u.allow_force_interactive_download,
+      has_qbit_api_key: !!u.has_qbit_api_key
     }));
   } catch (error) {
     logger.error('Erreur lors de la récupération de tous les utilisateurs:', error);
@@ -91,10 +100,8 @@ export async function getAllUsers() {
   }
 }
 
-// Exporter les fonctions principales et le sous-module admin
 export default {
   verifyCredentials,
   getUserById,
-  getAllUsers,
-  admin
+  getAllUsers
 };

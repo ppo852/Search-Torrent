@@ -1,7 +1,8 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import { Toast } from '../components/core/Toast';
 import { api } from '../services/api';
 import { useParams, useNavigate } from 'react-router-dom';
+import { showToast, showApiErrorToast } from '../stores/toastStore';
+import { hasTmdbAnimationGenre, TMDB_ANIMATION_GENRE_ID } from '../lib/tmdb-category-filter';
 import { Calendar, Star, Tv, Film, BookmarkPlus, X, Play } from 'lucide-react';
 import { tmdbAPI } from '../services/tmdb/tmdb';
 import { ResultCard } from '../components/ui/ResultCard';
@@ -13,6 +14,10 @@ import { ExpandableText } from '../components/ui/ExpandableText';
 import { TrailerModal } from '../components/ui/TrailerModal';
 import { pickBestTrailer, type TmdbVideo } from '../lib/tmdb-videos';
 import { useInteractiveTorrentDownload } from '../hooks/useInteractiveTorrentDownload';
+import { useRequestStatus } from '../hooks/useRequestStatus';
+import { PosterBadgeStack } from '../components/ui/PosterBadgeStack';
+import { TvShowSeasonStatusPanel } from '../components/ui/TvShowSeasonStatusPanel';
+import type { TvSeasonStatusRow } from '../services/api/api';
 import {
   QUALITY_FILTER_OPTIONS,
   LANGUAGE_FILTER_OPTIONS,
@@ -27,6 +32,7 @@ export function MediaDetailPage() {
   const navigate = useNavigate();
   const [media, setMedia] = useState<(TmdbResult & { backdropPath?: string | null }) | null>(null);
   const [isAnime, setIsAnime] = useState(false);
+  const [isAnimationMovie, setIsAnimationMovie] = useState(false);
   const [tvSeasons, setTvSeasons] = useState<Array<{ season_number: number; name?: string }>>([]);
   const [sortOption, setSortOption] = useState<SortOption>('size');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -34,8 +40,6 @@ export function MediaDetailPage() {
   const [selectedSeason, setSelectedSeason] = useState<string>('all');
   const [qualityFilter, setQualityFilter] = useState<QualityFilter>('all');
   const [languageFilter, setLanguageFilter] = useState<LanguageFilter>('admin');
-  const [showToast, setShowToast] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [seasonModalOpen, setSeasonModalOpen] = useState(false);
   const [selectedSeasonNumbers, setSelectedSeasonNumbers] = useState<number[]>([]);
   const itemsPerPage = 25;
@@ -45,6 +49,8 @@ export function MediaDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [trailer, setTrailer] = useState<TmdbVideo | null>(null);
   const [trailerModalOpen, setTrailerModalOpen] = useState(false);
+  const [seasonStatusRows, setSeasonStatusRows] = useState<TvSeasonStatusRow[]>([]);
+  const { getPosterBadges } = useRequestStatus();
 
   useEffect(() => {
     const loadMediaDetails = async () => {
@@ -54,8 +60,12 @@ export function MediaDetailPage() {
       setTrailerModalOpen(false);
 
       try {
-        if (!globalSettings.getTmdbAccessToken()) {
+        if (!globalSettings.isTmdbConfigured()) {
           await globalSettings.load();
+        }
+
+        if (!globalSettings.isTmdbConfigured()) {
+          throw new Error('TMDB non configuré');
         }
 
         let data;
@@ -111,8 +121,11 @@ export function MediaDetailPage() {
           setTvSeasons(seasons);
         }
 
-        const detectedAnime = actualType === 'tv' && Array.isArray(data.genres) && data.genres.some((g: any) => g.id === 16);
+        const hasAnimationGenre = hasTmdbAnimationGenre(data);
+        const detectedAnime = actualType === 'tv' && hasAnimationGenre;
+        const detectedAnimationMovie = actualType === 'movie' && hasAnimationGenre;
         setIsAnime(detectedAnime);
+        setIsAnimationMovie(detectedAnimationMovie);
         setIsLoading(true);
         setError(null);
 
@@ -121,7 +134,12 @@ export function MediaDetailPage() {
         const title = (actualType === 'movie' ? data.title : data.name) || (actualType === 'movie' ? data.original_title : data.original_name) || '';
 
         if (actualType === 'movie') {
-          const response = await api.searchMovie(title, year, data.id);
+          const response = await api.searchMovie(
+            title,
+            year,
+            data.id,
+            detectedAnimationMovie ? 'animation' : 'movie'
+          );
           searchResults = response?.results || [];
         } else {
           const response = await api.searchTvSeries(title, detectedAnime ? 'anime' : 'tv', data.id, year);
@@ -138,6 +156,28 @@ export function MediaDetailPage() {
 
     loadMediaDetails();
   }, [type, id, setResults, setIsLoading, setError]);
+
+  useEffect(() => {
+    const loadSeasonStatus = async () => {
+      if (!media || media.type !== 'tv') {
+        setSeasonStatusRows([]);
+        return;
+      }
+
+      try {
+        const { seasons } = await api.getTvShowSeasonStatus(media.id, {
+          mediaType: isAnime ? 'anime' : 'tv',
+          title: media.title,
+          seasons: tvSeasons.map((s) => s.season_number),
+        });
+        setSeasonStatusRows(seasons || []);
+      } catch {
+        setSeasonStatusRows([]);
+      }
+    };
+
+    loadSeasonStatus();
+  }, [media, isAnime, tvSeasons]);
 
   const handleSort = (option: SortOption) => {
     if (option === sortOption) {
@@ -164,23 +204,24 @@ export function MediaDetailPage() {
         poster_url: media.posterPath || null,
         season_numbers: selectedSeasonNumbers
       });
-      setToastMessage('Ajouté au suivi');
+      showToast('Ajouté au suivi');
       closeSeasonModal();
+      try {
+        const { seasons } = await api.getTvShowSeasonStatus(media.id, {
+          mediaType: isAnime ? 'anime' : 'tv',
+          title: media.title,
+          seasons: tvSeasons.map((s) => s.season_number),
+        });
+        setSeasonStatusRows(seasons || []);
+      } catch {
+        /* ignore */
+      }
     } catch (err: any) {
-      setToastMessage(err.message || 'Erreur lors de la demande');
+      showApiErrorToast(err, 'Erreur lors de la demande');
     }
   };
 
-  const { download, confirmModal } = useInteractiveTorrentDownload({
-    onSuccess: (msg) => {
-      setToastMessage(msg);
-      setShowToast(true);
-    },
-    onError: (msg) => {
-      setToastMessage(msg);
-      setShowToast(true);
-    },
-  });
+  const { download, confirmModal } = useInteractiveTorrentDownload();
 
   const handleDownload = async (result: SearchResult) => {
     let indexerTag: string | undefined;
@@ -190,13 +231,33 @@ export function MediaDetailPage() {
       }
     } catch (e) {}
 
+    const seasonFromName = extractSeason(result.name);
+    const seasonNum =
+      selectedSeason !== 'all'
+        ? parseInt(selectedSeason, 10)
+        : seasonFromName
+          ? parseInt(seasonFromName, 10)
+          : undefined;
+    const episodeMatch = result.name.match(/\bS\d{1,2}[\s._-]*E(\d{1,4})\b/i)
+      || result.name.match(/\b(\d{1,2})x(\d{1,4})\b/i);
+    const episodeNum = episodeMatch
+      ? parseInt(episodeMatch[episodeMatch.length - 1], 10)
+      : undefined;
+
     await download({
       url: result.link,
       name: result.name,
       itemCategory: result.category,
       categoryId: result.categoryId,
-      mediaType: (isAnime ? 'anime' : (media?.type || type)) as 'movie' | 'tv' | 'anime' | undefined,
+      mediaType: (isAnime
+        ? 'anime'
+        : isAnimationMovie
+          ? 'animation'
+          : (media?.type || type)) as 'movie' | 'tv' | 'anime' | 'animation' | undefined,
       tags: indexerTag ? [indexerTag] : undefined,
+      tmdbId: media?.id,
+      seasonNumber: Number.isInteger(seasonNum) && seasonNum > 0 ? seasonNum : undefined,
+      episodeNumber: Number.isInteger(episodeNum) && episodeNum > 0 ? episodeNum : undefined,
     });
   };
 
@@ -220,14 +281,14 @@ export function MediaDetailPage() {
     try {
       await api.addLibraryItem({
         tmdb_id: media.id,
-        media_type: 'movie',
+        media_type: isAnimationMovie ? 'animation' : 'movie',
         title: media.title,
         poster_url: media.posterPath || null,
         release_date: media.releaseDate || null
       });
-      setToastMessage('Ajouté aux demandes');
+      showToast('Ajouté aux demandes');
     } catch (err: any) {
-      setToastMessage(err.message || 'Erreur lors de la demande');
+      showApiErrorToast(err, 'Erreur lors de la demande');
     }
   };
 
@@ -321,7 +382,8 @@ export function MediaDetailPage() {
 
   if (!media) return null;
 
-  const displayGenres = media.genres?.filter((g) => !(isAnime && g.id === 16)) ?? [];
+  const displayGenres = media.genres?.filter((g) => !((isAnime || isAnimationMovie) && g.id === TMDB_ANIMATION_GENRE_ID)) ?? [];
+  const posterBadges = getPosterBadges(media.id, media.type, isAnime, media.title);
 
   return (
     <div className="animate-premium-fade relative min-h-screen">
@@ -341,7 +403,9 @@ export function MediaDetailPage() {
       <div className="relative z-10 p-6 max-w-7xl mx-auto">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 mb-20">
           <div className="lg:col-span-3">
-            <div className="glass-card overflow-hidden shadow-2xl group border-white/10">
+            <div className="glass-card relative overflow-hidden shadow-2xl group border-white/10">
+              <div className="relative">
+                {posterBadges.length > 0 && <PosterBadgeStack badges={posterBadges} />}
               {media.posterPath ? (
                 <img
                   src={media.posterPath.replace('w342', 'w500')}
@@ -351,13 +415,16 @@ export function MediaDetailPage() {
               ) : (
                 <div className="aspect-[2/3] flex items-center justify-center bg-gray-900 text-gray-600 font-black uppercase">Pas d'affiche</div>
               )}
+              </div>
             </div>
-          </div>
+            </div>
 
           <div className="lg:col-span-9 flex flex-col justify-center">
             <div className="flex items-center gap-4 mb-4">
               <div className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${media.type === 'movie' ? 'bg-blue-600/20 border-blue-500/50 text-blue-400' : 'bg-purple-600/20 border-purple-500/50 text-purple-400'}`}>
-                {media.type === 'movie' ? 'Film' : isAnime ? 'Anime' : 'Série TV'}
+                {media.type === 'movie'
+                  ? (isAnimationMovie ? 'Animation' : 'Film')
+                  : isAnime ? 'Anime' : 'Série TV'}
               </div>
               {media.voteAverage > 0 && (
                 <div className="flex items-center gap-1.5 text-yellow-500 font-black">
@@ -429,6 +496,10 @@ export function MediaDetailPage() {
                 AUTOMATISER
               </button>
             </div>
+
+            {media.type === 'tv' && (
+              <TvShowSeasonStatusPanel rows={seasonStatusRows} />
+            )}
           </div>
         </div>
 
@@ -478,7 +549,9 @@ export function MediaDetailPage() {
                   key={result.link}
                   result={result}
                   onDownload={handleDownload}
-                  forcedCategory={isAnime ? 'anime' : type as string}
+                  forcedCategory={
+                    isAnime ? 'anime' : isAnimationMovie ? 'animation' : (type as string)
+                  }
                 />
               ))}
             </div>
@@ -521,12 +594,6 @@ export function MediaDetailPage() {
         </div>
       </div>
 
-      {(showToast || toastMessage) && (
-        <Toast
-          message={toastMessage || "Torrent ajouté avec succès !"}
-          onClose={() => { setShowToast(false); setToastMessage(null); }}
-        />
-      )}
       {confirmModal}
       <TrailerModal
         isOpen={trailerModalOpen}

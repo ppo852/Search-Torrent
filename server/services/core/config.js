@@ -9,7 +9,7 @@ const rootDir = join(__dirname, '../../..');
 const dataDir = join(rootDir, 'data');
 
 // Configuration de la base de données
-const dbPath = join(dataDir, 'database.sqlite');
+const dbPath = process.env.DATABASE_PATH || join(dataDir, 'database.sqlite');
 
 // Configuration de l'authentification
 let JWT_SECRET = process.env.JWT_SECRET;
@@ -32,22 +32,8 @@ const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
 const CACHE_DURATION_MINUTES = 60;
 const TMDB_CACHE_DURATION_DAYS = 7;
 
-// Configuration du compte admin initial
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
-let ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-
-if (!ADMIN_PASSWORD) {
-  if (process.env.NODE_ENV === 'production') {
-    console.error('❌ CRITICAL ERROR: ADMIN_PASSWORD environment variable is missing!');
-    console.error('The default password "admin" is BLOCKED in production for security.');
-    ADMIN_PASSWORD = 'PROTECTED_PLEASE_SET_ADMIN_PASSWORD_ENV';
-  } else {
-    console.warn('⚠️ Warning: ADMIN_PASSWORD is not defined, using default "admin" for development.');
-    ADMIN_PASSWORD = 'admin';
-  }
-}
-
 // Export des constantes
+// Note: compte initial admin/admin créé dans init-db.js (pas via env)
 export default {
   paths: {
     root: rootDir,
@@ -59,9 +45,7 @@ export default {
   },
   auth: {
     jwtSecret: JWT_SECRET,
-    jwtExpiresIn: JWT_EXPIRES_IN,
-    adminUsername: ADMIN_USERNAME,
-    adminDefaultPassword: ADMIN_PASSWORD
+    jwtExpiresIn: JWT_EXPIRES_IN
   },
   app: {
     port: PORT,

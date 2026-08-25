@@ -46,11 +46,36 @@ export function simplifyTitle(title) {
 
 
 /**
- * Load the quality profile assigned to a media type
+ * Films et Animation partagent la logique « movie-like » (inventaire, etc.)
+ */
+export function isMovieLikeMediaType(mediaType) {
+  return mediaType === 'movie' || mediaType === 'animation';
+}
+
+/**
+ * Profil qualité assigné au type de média.
+ * Animation → animation_profile_id puis repli movie_profile_id
+ * Anime → anime_profile_id puis repli tv_profile_id
  */
 export function loadAssignedQualityProfile(mediaType, qualityProfiles, assignments) {
-  const isMovie = mediaType === 'movie';
-  const assignedId = isMovie ? assignments?.movie_profile_id : assignments?.tv_profile_id;
+  const a = assignments || {};
+  let assignedId = null;
+
+  switch (mediaType) {
+    case 'animation':
+      assignedId = a.animation_profile_id || a.movie_profile_id;
+      break;
+    case 'anime':
+      assignedId = a.anime_profile_id || a.tv_profile_id;
+      break;
+    case 'movie':
+      assignedId = a.movie_profile_id;
+      break;
+    case 'tv':
+    default:
+      assignedId = a.tv_profile_id;
+      break;
+  }
 
   if (!assignedId) return null;
   return (qualityProfiles || []).find((p) => p?.id === assignedId) || null;

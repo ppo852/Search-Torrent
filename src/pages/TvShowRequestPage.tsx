@@ -4,12 +4,13 @@ import { ArrowLeft, Clock, Search, Tag, Trash2, X } from 'lucide-react';
 import { api } from '../services/api';
 import { TvSeasonRequest, TvEpisode, TvSeasonPresence } from '../types';
 import ManualSearchModal from '../components/ManualSearchModal';
-import { Toast } from '../components/core/Toast';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
+import { showErrorToast, showInfoToast, showToast } from '../stores/toastStore';
 import { globalSettings } from '../services/settings';
 import { useAuthStore } from '../stores/authStore';
 import { tmdbAPI } from '../services/tmdb/tmdb';
 import { ExpandableText } from '../components/ui/ExpandableText';
+import { getRequestStatusBadge } from '../lib/request-status-labels';
 
 
 type TvDetailEpisode = {
@@ -31,6 +32,19 @@ type TvSeasonHistoryRow = {
   created_at: string;
 };
 
+type SearchResultItem = {
+  name: string;
+  link: string;
+  size: number;
+  seeds: number;
+  leech?: number;
+  engine_url?: string;
+  desc_link?: string;
+  publishDate?: string | null;
+  is_compatible?: boolean;
+  incompatible_reason?: string | null;
+};
+
 function formatDate(value?: string | null) {
   if (!value) return 'Date inconnue';
   const d = new Date(value);
@@ -45,23 +59,12 @@ function formatDateTime(value?: string | null) {
   return d.toLocaleString();
 }
 
-function tvSeasonStatusLabel(status?: string) {
-  const s = String(status || '').toLowerCase();
-  if (s === 'pending') return 'En attente';
-  if (s === 'found') return 'Torrent trouvé';
-  if (s === 'monitoring' || s === 'monitored') return 'Surveillance';
-  if (s === 'sent_to_qbit') return 'Actif';
-  if (s === 'already_available') return 'Présent';
-  if (s === 'not_aired') return 'Non diffusé';
-  if (s === 'completed' || s === 'completed_season') return 'Complété';
-  if (s === 'error') return 'Erreur';
-  return status ? String(status) : '—';
-}
 
 export function TvShowRequestPage() {
   const { tmdbId, mediaType } = useParams<{ tmdbId: string; mediaType: 'tv' | 'anime' }>();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const canForce = useAuthStore((s) => !!s.user?.allow_force_interactive_download);
 
   const [seasons, setSeasons] = useState<TvSeasonRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -69,7 +72,7 @@ export function TvShowRequestPage() {
   const [backdropPath, setBackdropPath] = useState<string | null>(null);
   const [overview, setOverview] = useState<string | null>(null);
 
-  const [expandedSeasonId, setExpandedSeasonId] = useState<string | null>(null);
+  const [expandedSeasonIds, setExpandedSeasonIds] = useState<Set<string>>(new Set());
   const [episodesBySeasonId, setEpisodesBySeasonId] = useState<Record<string, TvDetailEpisode[]>>({});
   const [episodesLoadingSeasonId, setEpisodesLoadingSeasonId] = useState<string | null>(null);
   const [presenceBySeasonId, setPresenceBySeasonId] = useState<Record<string, { present_episodes: number[]; downloading_episodes: number[]; missing_episodes: number[] }>>({});
@@ -86,7 +89,6 @@ export function TvShowRequestPage() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [historyItems, setHistoryItems] = useState<TvSeasonHistoryRow[]>([]);
   const [historySeason, setHistorySeason] = useState<TvSeasonRequest | null>(null);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [seasonToDelete, setSeasonToDelete] = useState<TvSeasonRequest | null>(null);
@@ -103,12 +105,22 @@ export function TvShowRequestPage() {
       const filtered = (list || []).filter((x: any) => x.tmdb_id === parsedTmdbId && x.media_type === mediaType);
       setSeasons(filtered);
       if (filtered.length > 0) {
+        setExpandedSeasonIds(new Set(filtered.map((s: TvSeasonRequest) => s.id)));
         try {
           const data = await tmdbAPI.getTvDetails(String(parsedTmdbId));
           if (data.backdrop_path) setBackdropPath(`https://image.tmdb.org/t/p/original${data.backdrop_path}`);
           setOverview(data.overview);
         } catch (e) { }
-      } else setError('Aucune saison');
+        await Promise.all(
+          filtered.map(async (s: TvSeasonRequest) => {
+            await loadSeasonEpisodes(s);
+            await loadSeasonPresence(s, true);
+          })
+        );
+      } else {
+        setError('Aucune saison');
+        setExpandedSeasonIds(new Set());
+      }
     } catch (e) { setError('Erreur'); }
     finally { setIsLoading(false); }
   };
@@ -146,22 +158,45 @@ export function TvShowRequestPage() {
     try {
       const data = await api.getTvSeasonPresence(season.id);
       setPresenceBySeasonId(prev => ({ ...prev, [season.id]: data }));
+      if (data?.status != null) {
+        setSeasons(prev => prev.map(s => {
+          if (s.id !== season.id) return s;
+          const clearedError = data.status === 'monitoring' || data.status === 'completed';
+          return {
+            ...s,
+            status: data.status,
+            next_episode_number: data.next_episode_number ?? s.next_episode_number,
+            ...(clearedError ? { last_error: null } : {})
+          };
+        }));
+      }
     } catch (e) { }
     finally { setPresenceLoadingSeasonId(null); }
   };
 
   const toggleSeason = async (season: TvSeasonRequest) => {
-    const next = expandedSeasonId === season.id ? null : season.id;
-    setExpandedSeasonId(next);
-    if (next) {
+    const isExpanded = expandedSeasonIds.has(season.id);
+    setExpandedSeasonIds((prev) => {
+      const next = new Set(prev);
+      if (isExpanded) next.delete(season.id);
+      else next.add(season.id);
+      return next;
+    });
+    if (!isExpanded) {
       await loadSeasonEpisodes(season);
-      await loadSeasonPresence(season);
+      await loadSeasonPresence(season, true);
     }
+  };
+
+  const resetModalState = () => {
+    setModalError(null);
+    setForceAvailable(false);
   };
 
   const openEpisodeSearchModal = async (season: TvSeasonRequest, episodeNumber: number) => {
     setIsModalOpen(true);
     setModalLoading(true);
+    resetModalState();
     setModalSeason(season);
     setModalEpisodeNumber(episodeNumber);
     try {
@@ -174,8 +209,9 @@ export function TvShowRequestPage() {
   const openSeasonSearchModal = async (season: TvSeasonRequest) => {
     setIsModalOpen(true);
     setModalLoading(true);
+    resetModalState();
     setModalSeason(season);
-    setModalEpisodeNumber(null); // null signifie qu'on cherche un Pack
+    setModalEpisodeNumber(null);
     try {
       const data = await api.searchTvSeasonRequest(season.id);
       setModalResults(data?.results || []);
@@ -197,50 +233,97 @@ export function TvShowRequestPage() {
   const downloadResult = async (r: SearchResultItem) => {
     if (!modalSeason) return;
     try {
+      setModalError(null);
       await api.selectTvSeasonRequest(modalSeason.id, { name: r.name, link: r.link, size: r.size, seeds: r.seeds });
-      const updated = await api.sendTvSeasonRequestToQbit(modalSeason.id, { episode_number: modalEpisodeNumber });
+      const updated = await api.sendTvSeasonRequestToQbit(modalSeason.id, {
+        episode_number: modalEpisodeNumber ?? undefined,
+      });
       setSeasons(prev => prev.map(s => s.id === updated.id ? updated : s));
       setIsModalOpen(false);
-      setToastMessage(modalEpisodeNumber ? `Épisode E${modalEpisodeNumber} envoyé !` : `Pack Saison ${modalSeason.season_number} envoyé !`);
+      resetModalState();
+      showToast(modalEpisodeNumber ? `Épisode E${modalEpisodeNumber} envoyé !` : `Pack Saison ${modalSeason.season_number} envoyé !`);
     } catch (e: any) {
-      if (e?.status === 409) { setForceAvailable(true); setModalError('Déjà présent'); }
+      if (e?.status === 409) {
+        setModalError('Déjà présent dans la médiathèque');
+        let canForceLive = canForce;
+        if (user?.id) {
+          try {
+            const freshUser = await api.getUser(user.id);
+            canForceLive = !!freshUser?.allow_force_interactive_download;
+            if (canForceLive !== canForce) {
+              useAuthStore.getState().patchUser({
+                allow_force_interactive_download: canForceLive,
+              });
+            }
+          } catch {
+            /* garder la valeur locale */
+          }
+        }
+        setForceAvailable(canForceLive);
+      } else {
+        setModalError('Erreur envoi');
+      }
     }
   };
 
+  const forceDownload = async () => {
+    if (!modalSeason) return;
+    try {
+      setModalLoading(true);
+      const updated = await api.sendTvSeasonRequestToQbit(modalSeason.id, {
+        episode_number: modalEpisodeNumber ?? undefined,
+        force: true,
+      });
+      setSeasons(prev => prev.map(s => s.id === updated.id ? updated : s));
+      setIsModalOpen(false);
+      resetModalState();
+      showToast(modalEpisodeNumber ? `Épisode E${modalEpisodeNumber} forcé !` : `Pack Saison ${modalSeason.season_number} forcé !`);
+    } catch (e: any) {
+      setModalError(e?.status === 403 ? 'Forçage non autorisé' : 'Erreur forçage');
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  const closeSearchModal = () => {
+    setIsModalOpen(false);
+    resetModalState();
+  };
+
   const autoDownloadEpisode = async (season: TvSeasonRequest, episodeNumber: number) => {
-    setToastMessage(`Recherche automatique lancée pour E${episodeNumber}...`);
+    showInfoToast(`Recherche automatique lancée pour E${episodeNumber}...`);
     try {
       const data = await api.autoSearchTvSeasonEpisodeRequest(season.id, { episode_number: episodeNumber });
       if (data?.request) {
         setSeasons(prev => prev.map(s => s.id === data.request.id ? data.request : s));
         const status = data.result?.status;
         if (status === 'sent_episode') {
-          setToastMessage(`Torrent trouvé et envoyé pour E${episodeNumber} !`);
+          showToast(`Torrent trouvé et envoyé pour E${episodeNumber} !`);
         } else if (status === 'no_results') {
-          setToastMessage(`Aucun résultat conforme pour E${episodeNumber}.`);
+          showInfoToast(`Aucun résultat conforme pour E${episodeNumber}.`);
         } else if (status === 'already_present') {
-          setToastMessage(`Épisode ${episodeNumber} déjà présent.`);
+          showInfoToast(`Épisode ${episodeNumber} déjà présent.`);
         } else if (status === 'not_aired') {
-          setToastMessage(`Épisode ${episodeNumber} pas encore diffusé.`);
+          showInfoToast(`Épisode ${episodeNumber} pas encore diffusé.`);
         } else if (status === 'error') {
-          setToastMessage(`Erreur : ${data.result?.error || 'Échec de la recherche'}`);
+          showErrorToast(`Erreur : ${data.result?.error || 'Échec de la recherche'}`);
         }
       }
     } catch (e: any) {
-      setToastMessage(`Erreur lors de la recherche : ${e.message || 'Erreur inconnue'}`);
+      showErrorToast(`Erreur lors de la recherche : ${e.message || 'Erreur inconnue'}`);
     }
   };
 
   const autoDownloadSeason = async (season: TvSeasonRequest) => {
-    setToastMessage(`Recherche automatique lancée pour la saison ${season.season_number}...`);
+    showInfoToast(`Recherche automatique lancée pour la saison ${season.season_number}...`);
     try {
       const data = await api.autoSearchTvSeasonRequest(season.id);
       if (data?.request) {
         setSeasons(prev => prev.map(s => s.id === data.request.id ? data.request : s));
-        setToastMessage(`Scan de la saison ${season.season_number} terminé.`);
+        showToast(`Scan de la saison ${season.season_number} terminé.`);
       }
     } catch (e: any) {
-      setToastMessage(`Erreur lors du scan : ${e.message || 'Erreur inconnue'}`);
+      showErrorToast(`Erreur lors du scan : ${e.message || 'Erreur inconnue'}`);
     }
   };
 
@@ -254,9 +337,9 @@ export function TvShowRequestPage() {
     try {
       await api.deleteTvSeasonRequest(seasonToDelete.id);
       setSeasons(prev => prev.filter(s => s.id !== seasonToDelete.id));
-      setToastMessage(`Saison ${seasonToDelete.season_number} supprimée.`);
+      showToast(`Saison ${seasonToDelete.season_number} supprimée.`);
     } catch (e: any) {
-      setToastMessage(`Erreur lors de la suppression : ${e.message || 'Erreur inconnue'}`);
+      showErrorToast(`Erreur lors de la suppression : ${e.message || 'Erreur inconnue'}`);
     } finally {
       setIsConfirmModalOpen(false);
       setSeasonToDelete(null);
@@ -333,12 +416,19 @@ export function TvShowRequestPage() {
         <div className="space-y-4">
           <h2 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em] ml-2">Flux de surveillance</h2>
           {sortedSeasons.map((s) => (
-            <div key={s.id} className={`glass-card transition-all border-white/5 overflow-hidden ${expandedSeasonId === s.id ? 'ring-2 ring-blue-500/20' : ''}`}>
+            <div key={s.id} className={`glass-card transition-all border-white/5 overflow-hidden ${expandedSeasonIds.has(s.id) ? 'ring-2 ring-blue-500/20' : ''}`}>
               <div className="p-5 md:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-6">
                 <div className="flex-1 cursor-pointer" onClick={() => toggleSeason(s)}>
                   <div className="flex flex-wrap items-center gap-3 mb-2">
                     <span className="text-xl md:text-2xl font-black text-white tracking-tighter uppercase">Saison {s.season_number}</span>
-                    <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest border ${s.status === 'completed' ? 'bg-green-500/10 border-green-500/20 text-green-400' : 'bg-blue-500/10 border-blue-500/20 text-blue-400'}`}>{tvSeasonStatusLabel(s.status)}</span>
+                    {(() => {
+                      const badge = getRequestStatusBadge(s.status);
+                      return (
+                        <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest border ${badge.className}`}>
+                          {badge.label}
+                        </span>
+                      );
+                    })()}
                   </div>
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[9px] md:text-[10px] font-black text-gray-600 uppercase tracking-widest">
                     <span className="flex items-center gap-2"><Clock size={12} /> Prochain: E{s.next_episode_number}</span>
@@ -346,14 +436,14 @@ export function TvShowRequestPage() {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-2 md:gap-3">
-                  <button onClick={() => openHistory(s)} className="px-3 md:px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-gray-400 font-black text-[9px] md:text-[10px] uppercase tracking-widest transition-all">Historique</button>
+                  <button onClick={() => openHistory(s)} className="px-2.5 md:px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-gray-400 font-black text-[9px] md:text-[10px] uppercase tracking-widest transition-all">Historique</button>
                   <button onClick={() => openSeasonSearchModal(s)} className="px-3 md:px-4 py-2 bg-white/5 hover:bg-blue-600 rounded-xl text-white font-black text-[9px] md:text-[10px] uppercase tracking-widest transition-all flex items-center gap-2"><Search size={12} /> Manuel</button>
                   <button onClick={() => autoDownloadSeason(s)} className="px-4 md:px-6 py-2 premium-gradient rounded-xl text-white font-black text-[9px] md:text-[10px] uppercase tracking-widest shadow-lg shadow-blue-600/20 hover:scale-[1.02] transition-all">Auto Scan</button>
                   <button onClick={() => deleteSeason(s)} disabled={!canManageSeason(s)} className="p-1.5 md:p-2 bg-red-600/5 hover:bg-red-600/10 rounded-xl text-red-400 transition-all disabled:opacity-20"><Trash2 size={18} /></button>
                 </div>
               </div>
 
-              {expandedSeasonId === s.id && (
+              {expandedSeasonIds.has(s.id) && (
                 <div className="bg-black/20 border-t border-white/5 p-6 animate-premium-fade">
                   <div className="flex items-center justify-between mb-8">
                     <div className="flex items-center gap-6">
@@ -403,12 +493,14 @@ export function TvShowRequestPage() {
 
       <ManualSearchModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={closeSearchModal}
         title={modalEpisodeNumber ? "Recherche Épisode" : "Recherche Pack Saison"}
         subtitle={modalEpisodeNumber ? `Saison ${modalSeason?.season_number} — Épisode ${modalEpisodeNumber}` : `Saison ${modalSeason?.season_number} — Pack Complet`}
         results={modalResults}
         isLoading={modalLoading}
         onDownload={downloadResult}
+        error={modalError}
+        onForceDownload={forceAvailable ? forceDownload : undefined}
       />
 
       {isHistoryOpen && (
@@ -433,7 +525,6 @@ export function TvShowRequestPage() {
           </div>
         </div>
       )}
-      {toastMessage && <Toast message={toastMessage} onClose={() => setToastMessage(null)} />}
 
       <ConfirmModal
         isOpen={isConfirmModalOpen}

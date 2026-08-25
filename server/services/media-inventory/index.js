@@ -3,14 +3,16 @@ import logger from '../core/logger.js';
 import scanner from './scanner.js';
 import fetch from 'node-fetch';
 import { getSetting } from '../settings/index.js';
-import { cleanMediaTitle, normalizeTitleForDb } from './utils.js';
+import { cleanMediaTitle, normalizeTitleForDb, coerceYear } from './utils.js';
 import userService from '../users/index.js';
 import { deleteByPath } from './store.js';
+import { findEmbyMatches, findEmbySeasonEpisodes } from '../emby/store.js';
 
 
 // normalizeTitle is now provided by utils.normalizeTitleForDb
 
-async function ensureSchema() {
+/** Migration douce colonnes inventaire local (tmdb_id, etc.) — appelée avant scan et APIs qui lisent ces colonnes. */
+export async function ensureSchema() {
   try {
     const cols = await query(`PRAGMA table_info(local_media_inventory)`);
     const names = new Set((cols || []).map((c) => c.name));
@@ -29,21 +31,12 @@ async function ensureSchema() {
     await run(`CREATE INDEX IF NOT EXISTS idx_inventory_tmdb ON local_media_inventory(media_kind, tmdb_id)`);
     await run(`CREATE INDEX IF NOT EXISTS idx_inventory_tv_season_ep ON local_media_inventory(media_kind, title_normalized, season, episode)`);
   } catch (err) {
-    // ignore
+    logger.warn('ensureSchema local_media_inventory:', err?.message || err);
   }
-}
-
-function coerceYear(value) {
-  const y = Number(value);
-  if (!Number.isInteger(y)) return null;
-  if (y < 1900 || y > 2100) return null;
-  return y;
 }
 
 export async function isPresent({ kind, title, year, season, episode, tmdb_id }) {
   const mediaKind = String(kind || '').toLowerCase() === 'movie' ? 'movie' : 'tv';
-
-  const dbg = String(process.env.DEBUG_MEDIA_INVENTORY || '').toLowerCase() === '1';
 
   // If tmdb_id provided, prioritize ID matching (do this before any title checks)
   const id = Number(tmdb_id);
@@ -92,73 +85,104 @@ export async function isPresent({ kind, title, year, season, episode, tmdb_id })
         tmdb_id: r.tmdb_id
       }))
     });
-    if ((rowsById || []).length > 0) return { present: true, matches: rowsById };
+    if ((rowsById || []).length > 0) {
+      return {
+        present: true,
+        matches: rowsById.map((r) => ({ ...r, source: 'disk' })),
+      };
+    }
   }
 
   const titleNorm = normalizeTitleForDb(title);
-  if (!titleNorm) return { present: false, matches: [] };
+  if (titleNorm) {
+    const params = [mediaKind, titleNorm];
+    const where = ['media_kind = ?', 'title_normalized = ?'];
 
-  const params = [mediaKind, titleNorm];
-  const where = ['media_kind = ?', 'title_normalized = ?'];
+    const y = coerceYear(year);
+    if (y != null) {
+      where.push('year = ?');
+      params.push(y);
+    }
 
-  const y = coerceYear(year);
-  if (y != null) {
-    where.push('year = ?');
-    params.push(y);
+    if (mediaKind === 'tv') {
+      const s = Number(season);
+      const e = Number(episode);
+      if (Number.isInteger(s) && s > 0) {
+        where.push('season = ?');
+        params.push(s);
+      }
+      if (Number.isInteger(e) && e > 0) {
+        where.push('episode = ?');
+        params.push(e);
+      }
+    }
+
+    const rows = await query(
+      `SELECT id, media_kind, title, year, season, episode, path, size, mtime_ms, tmdb_id
+       FROM local_media_inventory
+       WHERE ${where.join(' AND ')}
+       ORDER BY mtime_ms DESC
+       LIMIT 25`,
+      params
+    );
+
+    logger.debug('inventory', '[isPresent][by_title] input', {
+      mediaKind,
+      title,
+      title_normalized: titleNorm,
+      year,
+      season,
+      episode,
+      where: where.join(' AND '),
+      params
+    });
+    logger.debug('inventory', '[isPresent][by_title] result', {
+      count: (rows || []).length,
+      matches: (rows || []).slice(0, 3).map((r) => ({
+        title: r.title,
+        season: r.season,
+        episode: r.episode,
+        path: r.path,
+        tmdb_id: r.tmdb_id
+      }))
+    });
+
+    if ((rows || []).length > 0) {
+      return {
+        present: true,
+        matches: rows.map((r) => ({ ...r, source: 'disk' })),
+      };
+    }
   }
 
-  if (mediaKind === 'tv') {
-    const s = Number(season);
-    const e = Number(episode);
-    if (Number.isInteger(s) && s > 0) {
-      where.push('season = ?');
-      params.push(s);
+  // Fallback Emby (disque OU Emby)
+  try {
+    const embyMatches = await findEmbyMatches({
+      kind: mediaKind,
+      title,
+      year,
+      season,
+      episode,
+      tmdb_id,
+    });
+    if (embyMatches.length > 0) {
+      logger.debug('inventory', '[isPresent][emby] hit', {
+        count: embyMatches.length,
+        title,
+        tmdb_id,
+      });
+      return { present: true, matches: embyMatches };
     }
-    if (Number.isInteger(e) && e > 0) {
-      where.push('episode = ?');
-      params.push(e);
-    }
-  }
-
-  const rows = await query(
-    `SELECT id, media_kind, title, year, season, episode, path, size, mtime_ms, tmdb_id
-     FROM local_media_inventory
-     WHERE ${where.join(' AND ')}
-     ORDER BY mtime_ms DESC
-     LIMIT 25`,
-    params
-  );
-
-  logger.debug('inventory', '[isPresent][by_title] input', {
-    mediaKind,
-    title,
-    title_normalized: titleNorm,
-    year,
-    season,
-    episode,
-    where: where.join(' AND '),
-    params
-  });
-  logger.debug('inventory', '[isPresent][by_title] result', {
-    count: (rows || []).length,
-    matches: (rows || []).slice(0, 3).map((r) => ({
-      title: r.title,
-      season: r.season,
-      episode: r.episode,
-      path: r.path,
-      tmdb_id: r.tmdb_id
-    }))
-  });
-
-  if ((rows || []).length > 0) {
-    return { present: true, matches: rows };
+  } catch (err) {
+    logger.debug('inventory', '[isPresent][emby] skip', err?.message || err);
   }
 
   return { present: false, matches: [] };
 }
 
 /**
- * Récupère tous les épisodes présents pour une saison donnée (Batch check)
+ * Récupère tous les épisodes présents pour une saison donnée (Batch check).
+ * Disque OU Emby : TMDB d'abord, puis fallback titre.
  */
 export async function getSeasonPresence({ tmdb_id, title, season }) {
   const s = Number(season);
@@ -166,28 +190,42 @@ export async function getSeasonPresence({ tmdb_id, title, season }) {
 
   const dbg = String(process.env.DEBUG_MEDIA_INVENTORY || '').toLowerCase() === '1';
   const id = Number(tmdb_id);
+  const episodeSet = new Set();
 
-  let rows = [];
   if (id > 0) {
-    // Par TMDB ID
-    rows = await query(
-      `SELECT episode FROM local_media_inventory 
+    const rowsById = await query(
+      `SELECT episode FROM local_media_inventory
        WHERE media_kind = 'tv' AND tmdb_id = ? AND season = ?`,
       [id, s]
     );
-  } else {
-    // Par titre
-    const titleNorm = normalizeTitleForDb(title);
-    if (!titleNorm) return [];
-    rows = await query(
-      `SELECT episode FROM local_media_inventory 
+    for (const r of rowsById || []) {
+      if (r.episode != null) episodeSet.add(r.episode);
+    }
+  }
+
+  const titleNorm = normalizeTitleForDb(title);
+  if (titleNorm) {
+    const rowsByTitle = await query(
+      `SELECT episode FROM local_media_inventory
        WHERE media_kind = 'tv' AND title_normalized = ? AND season = ?`,
       [titleNorm, s]
     );
+    for (const r of rowsByTitle || []) {
+      if (r.episode != null) episodeSet.add(r.episode);
+    }
   }
 
-  const episodes = (rows || []).map(r => r.episode).filter(e => e != null);
-  
+  try {
+    const embyEps = await findEmbySeasonEpisodes({ tmdb_id, title, season: s });
+    for (const ep of embyEps || []) {
+      if (ep != null) episodeSet.add(ep);
+    }
+  } catch (err) {
+    logger.debug('inventory', '[getSeasonPresence][emby] skip', err?.message || err);
+  }
+
+  const episodes = Array.from(episodeSet);
+
   if (dbg) {
     logger.debug('inventory', `Found ${episodes.length} episodes for ${title || id} S${s}`);
   }
@@ -199,6 +237,7 @@ async function collectMergedPaths() {
   const moviesPathsSet = new Set();
   const seriesPathsSet = new Set();
   const animePathsSet = new Set();
+  const animationPathsSet = new Set();
 
   const addPaths = (val, set) => {
     if (typeof val === 'string' && val.trim()) {
@@ -212,6 +251,7 @@ async function collectMergedPaths() {
       addPaths(u.download_path_movies, moviesPathsSet);
       addPaths(u.download_path_series, seriesPathsSet);
       addPaths(u.download_path_anime, animePathsSet);
+      addPaths(u.download_path_animation, animationPathsSet);
     }
   } catch (err) {
     logger.error('inventory', 'Error fetching user paths for scan:', err);
@@ -221,6 +261,7 @@ async function collectMergedPaths() {
     mergedMoviesPath: Array.from(moviesPathsSet).join(':'),
     mergedSeriesPath: Array.from(seriesPathsSet).join(':'),
     mergedAnimePath: Array.from(animePathsSet).join(':'),
+    mergedAnimationPath: Array.from(animationPathsSet).join(':'),
   };
 }
 
@@ -231,10 +272,14 @@ export async function scanNow() {
     mergedMoviesPath,
     mergedSeriesPath,
     mergedAnimePath,
+    mergedAnimationPath,
   } = await collectMergedPaths();
 
-  if (mergedMoviesPath || mergedSeriesPath || mergedAnimePath) {
-    logger.info('inventory', `Starting scan on merged paths: Movies[${mergedMoviesPath}] Series[${mergedSeriesPath}] Anime[${mergedAnimePath}]`);
+  if (mergedMoviesPath || mergedSeriesPath || mergedAnimePath || mergedAnimationPath) {
+    logger.info(
+      'inventory',
+      `Starting scan on merged paths: Movies[${mergedMoviesPath}] Series[${mergedSeriesPath}] Anime[${mergedAnimePath}] Animation[${mergedAnimationPath}]`
+    );
   } else {
     logger.warn('inventory', 'No scan paths found (global or user-specific)');
   }
@@ -243,6 +288,7 @@ export async function scanNow() {
     moviesPath: mergedMoviesPath,
     seriesPath: mergedSeriesPath,
     animePath: mergedAnimePath,
+    animationPath: mergedAnimationPath,
   });
 
   try {
@@ -428,6 +474,7 @@ export async function ingestFile(filePath) {
     moviesPath: paths.mergedMoviesPath,
     seriesPath: paths.mergedSeriesPath,
     animePath: paths.mergedAnimePath,
+    animationPath: paths.mergedAnimationPath,
   });
 
   if (!record) return null;
@@ -454,6 +501,7 @@ export async function removeFile(filePath) {
 }
 
 export default {
+  ensureSchema,
   isPresent,
   getSeasonPresence,
   scanNow,

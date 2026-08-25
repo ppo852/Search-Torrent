@@ -38,6 +38,7 @@ export function normalizeQbitCategory(value?: string | null): CategoryResult | n
 
 export function inferQbitCategoryFromMediaType(mediaType?: string | null): CategoryResult | null {
   if (mediaType === 'movie') return QBIT_CATEGORIES.MOVIES;
+  if (mediaType === 'animation') return QBIT_CATEGORIES.ANIMATION;
   if (mediaType === 'anime') return QBIT_CATEGORIES.ANIME;
   if (mediaType === 'tv') return QBIT_CATEGORIES.TV;
   if (mediaType === 'music') return QBIT_CATEGORIES.MUSIC;
@@ -90,8 +91,12 @@ export function getCategoryLabel(
   const catStr = (categoryDesc || '').toLowerCase();
   const nameStr = (fileName || '').toLowerCase();
 
-  if (/anime|animation/i.test(catStr)) {
+  if (/\banime\b/i.test(catStr)) {
     return QBIT_CATEGORIES.ANIME;
+  }
+
+  if (/\banimation\b|\banimated\b/i.test(catStr)) {
+    return QBIT_CATEGORIES.ANIMATION;
   }
 
   if (/music|musique|audio|flac|mp3|album|lossless|soundtrack/i.test(catStr) ||

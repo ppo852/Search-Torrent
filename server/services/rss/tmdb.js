@@ -309,8 +309,42 @@ export async function enrichItemsWithTMDB(items) {
           if (item.categoryName !== 'Anime') {
             enrichedItem = applyTmdbCategoryOverride(enrichedItem, {
               isAnimation: showDetails.is_animation,
+              mediaType: 'tv',
             });
           }
+        }
+      }
+
+      if (
+        tmdbData?.media_type === 'movie'
+        && Number.isFinite(tmdbData.tmdb_id)
+        && tmdbAccessToken
+        && item.categoryName !== 'Animation'
+      ) {
+        try {
+          const movieResp = await fetch(
+            `https://api.themoviedb.org/3/movie/${tmdbData.tmdb_id}?language=fr-FR`,
+            {
+              method: 'GET',
+              headers: {
+                Authorization: `Bearer ${String(tmdbAccessToken)}`,
+                'Content-Type': 'application/json',
+              },
+            }
+          );
+          if (movieResp.ok) {
+            const movieData = await movieResp.json();
+            const isAnimation = Array.isArray(movieData.genres)
+              && movieData.genres.some((genre) => genre?.id === TMDB_ANIMATION_GENRE_ID);
+            if (isAnimation) {
+              enrichedItem = applyTmdbCategoryOverride(enrichedItem, {
+                isAnimation: true,
+                mediaType: 'movie',
+              });
+            }
+          }
+        } catch {
+          // ignore movie genre lookup failures
         }
       }
 

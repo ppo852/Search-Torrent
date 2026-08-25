@@ -125,3 +125,26 @@ export async function markTvEpisodeError({ requestId, episodeNumber }) {
     [requestId, episodeNumber]
   );
 }
+
+/**
+ * @param {{ requestId: string, userId?: string|null, completedAt?: string }} options
+ */
+export async function markTvSeasonRequestCompleted({ requestId, userId, completedAt }) {
+  const now = completedAt ?? new Date().toISOString();
+  if (userId) {
+    await run(
+      `UPDATE tv_season_requests
+       SET status = 'completed', completed_at = COALESCE(completed_at, ?), last_checked_at = ?, last_error = NULL
+       WHERE id = ? AND user_id = ?`,
+      [now, now, requestId, userId]
+    );
+    return;
+  }
+
+  await run(
+    `UPDATE tv_season_requests
+     SET status = 'completed', completed_at = COALESCE(completed_at, ?), last_checked_at = ?, last_error = NULL
+     WHERE id = ?`,
+    [now, now, requestId]
+  );
+}

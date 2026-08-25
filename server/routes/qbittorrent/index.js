@@ -10,6 +10,7 @@ import {
   addTorrentHandler,
   reannounceHandler,
   recheckHandler,
+  exportTorrentHandler,
   pauseHandler,
   resumeHandler,
   createCategoryHandler
@@ -82,6 +83,13 @@ router.post('/reannounce', reannounceHandler);
  * @access Private
  */
 router.post('/recheck', recheckHandler);
+
+/**
+ * @route GET /api/qbittorrent/export
+ * @desc Télécharge le fichier .torrent depuis qBittorrent
+ * @access Private
+ */
+router.get('/export', exportTorrentHandler);
 
 /**
  * @route POST /api/qbittorrent/pause

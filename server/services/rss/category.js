@@ -81,19 +81,23 @@ const PROTECTED_CATEGORY_NAMES = new Set([
  * @param {{ isAnimation?: boolean }} opts
  * @returns {Object}
  */
-export function applyTmdbCategoryOverride(item, { isAnimation = false } = {}) {
+export function applyTmdbCategoryOverride(item, { isAnimation = false, mediaType = null } = {}) {
   if (!item) return item;
 
-  if (item.categoryName === 'Anime') {
-    return item;
-  }
-
-  if (PROTECTED_CATEGORY_NAMES.has(item.categoryName)) {
+  if (item.categoryName === 'Anime' || item.categoryName === 'Animation') {
     return item;
   }
 
   if (isAnimation) {
-    return { ...item, categoryName: 'Anime' };
+    const isMovie =
+      mediaType === 'movie' ||
+      item.categoryName === 'Films' ||
+      item.tmdb?.media_type === 'movie';
+    return { ...item, categoryName: isMovie ? 'Animation' : 'Anime' };
+  }
+
+  if (PROTECTED_CATEGORY_NAMES.has(item.categoryName)) {
+    return item;
   }
 
   return item;

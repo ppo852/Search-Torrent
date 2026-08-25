@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { CalendarDays, Download, Users, BookmarkPlus, HardDrive } from 'lucide-react';
 import type { CategoryType, SearchResult } from '../../types';
-import { formatSize, formatDate } from '../../lib/formatters';
+import { formatSize, formatDate } from '../../utils/formatters';
 import { getCategoryLabel } from '../../lib/categories';
 
 interface ResultCardProps {

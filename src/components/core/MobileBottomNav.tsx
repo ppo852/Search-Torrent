@@ -13,11 +13,15 @@ export function MobileBottomNav({ inIframe = false }: MobileBottomNavProps) {
   const { resetSearch } = useSearchStore();
   const location = useLocation();
 
+  // Accès direct : fixed en bas d'écran.
+  // Organizr (iframe) : dans le flux flex (bas de l'iframe), sans offset magique.
+  const positionClass = inIframe
+    ? 'relative order-last shrink-0'
+    : 'fixed bottom-0 left-0 right-0';
+
   return (
     <nav
-      className={`lg:hidden fixed left-0 right-0 w-full h-auto bg-gray-950/80 backdrop-blur-3xl border-t border-white/5 z-[100] flex items-start justify-around px-2 pt-2.5 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] ${
-        inIframe ? 'bottom-14' : 'bottom-0'
-      }`}
+      className={`lg:hidden ${positionClass} w-full h-auto bg-gray-950/80 backdrop-blur-3xl border-t border-white/5 z-[100] flex items-start justify-around px-2 pt-2.5 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]`}
     >
       {navigation.map((item) => (
         <NavLink
@@ -42,7 +46,7 @@ export function MobileBottomNav({ inIframe = false }: MobileBottomNavProps) {
             `}
         >
           <Settings size={22} />
-          <span className="text-[8px] font-black uppercase tracking-widest">ADMIN</span>
+          <span className="text-[8px] font-black uppercase tracking-widest">PARAM.</span>
         </NavLink>
       )}
       <button

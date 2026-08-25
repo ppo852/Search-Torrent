@@ -9,14 +9,22 @@ import autoSearchService from '../auto-search/index.js';
 import mediaInventoryService from '../media-inventory/index.js';
 import { updateDownloadingEpisodesStatus } from '../media-inventory/episode-status.js';
 import mediaWatcherService from '../media-inventory/watcher.js';
+import embyService from '../emby/index.js';
 import { getSetting } from '../settings/index.js';
 import logger from './logger.js';
+import {
+  INVENTORY_JOB_DISK_SCAN,
+  releaseInventoryJob,
+  tryAcquireInventoryJob,
+} from './inventory-job-lock.js';
 
 let autoSearchTimeoutId = null;
 let autoSearchIsRunning = false;
 
 let mediaScanTimeoutId = null;
 let mediaScanIsRunning = false;
+
+let embySyncTimeoutId = null;
 
 let rssRefreshIntervalId = null;
 let rssInitialTimeoutId = null;
@@ -45,8 +53,9 @@ export function initializeScheduledTasks() {
   // Démarrer la recherche automatique
   scheduleAutoSearch();
 
-  // Démarrer le scan de l'inventaire
-  scheduleMediaInventoryScan();
+  // Inventaire disque + Emby : périodique seulement (pas de scan/sync au démarrage)
+  scheduleMediaInventoryScan(0, { skipInitial: true });
+  scheduleEmbySync();
 
   // Watch for filesystem changes
   mediaWatcherService.startMediaWatcher().catch((err) => {
@@ -62,6 +71,7 @@ export async function stopAllTasks() {
   
   if (autoSearchTimeoutId) clearTimeout(autoSearchTimeoutId);
   if (mediaScanTimeoutId) clearTimeout(mediaScanTimeoutId);
+  if (embySyncTimeoutId) clearTimeout(embySyncTimeoutId);
   if (rssRefreshIntervalId) clearInterval(rssRefreshIntervalId);
   if (rssInitialTimeoutId) clearTimeout(rssInitialTimeoutId);
   
@@ -72,8 +82,14 @@ export async function stopAllTasks() {
 // --- Fin des fonctions de gestion ---
 
 
-export function scheduleMediaInventoryScan(initialDelayMinutes = 2) {
-  const delayMs = initialDelayMinutes * 60 * 1000;
+/**
+ * Programme le scan inventaire disque.
+ * @param {number} initialDelayMinutes
+ * @param {{ skipInitial?: boolean }} options — skipInitial=true : pas de scan immédiat (démarrage / replanif)
+ */
+export function scheduleMediaInventoryScan(initialDelayMinutes = 2, options = {}) {
+  const delayMs = Math.max(0, Number(initialDelayMinutes) || 0) * 60 * 1000;
+  const skipInitial = Boolean(options.skipInitial);
 
   if (mediaScanTimeoutId) {
     clearTimeout(mediaScanTimeoutId);
@@ -92,15 +108,28 @@ export function scheduleMediaInventoryScan(initialDelayMinutes = 2) {
           return;
         }
 
+        try {
+          tryAcquireInventoryJob(INVENTORY_JOB_DISK_SCAN);
+        } catch (lockErr) {
+          if (lockErr?.status === 409) {
+            logger.info(
+              `Scan inventaire reporté : ${lockErr.message}`
+            );
+            await scheduleNext();
+            return;
+          }
+          throw lockErr;
+        }
+
         mediaScanIsRunning = true;
         try {
           await mediaInventoryService.scanNow();
-          // Update downloading episodes status after scan
           await updateDownloadingEpisodesStatus();
         } catch (err) {
           logger.error('Erreur lors du scan media inventory (périodique):', err);
         } finally {
           mediaScanIsRunning = false;
+          releaseInventoryJob(INVENTORY_JOB_DISK_SCAN);
         }
 
         await scheduleNext();
@@ -115,17 +144,85 @@ export function scheduleMediaInventoryScan(initialDelayMinutes = 2) {
     }
   };
 
-  setTimeout(async () => {
+  if (skipInitial) {
+    scheduleNext().catch(() => {});
+    return;
+  }
+
+  mediaScanTimeoutId = setTimeout(async () => {
+    try {
+      tryAcquireInventoryJob(INVENTORY_JOB_DISK_SCAN);
+    } catch (lockErr) {
+      if (lockErr?.status === 409) {
+        logger.info(`Scan inventaire initial reporté : ${lockErr.message}`);
+        await scheduleNext();
+        return;
+      }
+      logger.error('Erreur lors du scan media inventory (initial):', lockErr);
+      await scheduleNext();
+      return;
+    }
+
     try {
       await mediaInventoryService.scanNow();
-      // Update downloading episodes status after initial scan
       await updateDownloadingEpisodesStatus();
     } catch (err) {
       logger.error('Erreur lors du scan media inventory (initial):', err);
+    } finally {
+      releaseInventoryJob(INVENTORY_JOB_DISK_SCAN);
     }
 
     await scheduleNext();
   }, delayMs);
+}
+
+/**
+ * Programme la sync Emby périodique uniquement (jamais de sync immédiat au démarrage / save).
+ * @param {number} _initialDelayMinutes — ignoré (compat appels existants)
+ * @param {{ skipInitial?: boolean }} _options — ignoré (compat ; toujours périodique only)
+ */
+export function scheduleEmbySync(_initialDelayMinutes = 3, _options = {}) {
+  if (embySyncTimeoutId) {
+    clearTimeout(embySyncTimeoutId);
+    embySyncTimeoutId = null;
+  }
+
+  const scheduleNext = async () => {
+    try {
+      const intervalSetting = await getSetting('emby_sync_interval_minutes');
+      const parsed = Number(intervalSetting);
+      const intervalMinutes = Number.isFinite(parsed) && parsed >= 5 ? parsed : 60;
+      const intervalMs = intervalMinutes * 60 * 1000;
+
+      embySyncTimeoutId = setTimeout(async () => {
+        try {
+          if (embyService.getSyncJobStatus().running) {
+            await scheduleNext();
+            return;
+          }
+          const { url, apiKey } = await embyService.getEmbyCredentials();
+          const libs = await getSetting('emby_library_ids');
+          const hasLibs = Array.isArray(libs) && libs.length > 0;
+          if (embyService.isEmbyConfigured(url, apiKey) && hasLibs) {
+            await embyService.syncNow();
+          }
+        } catch (err) {
+          if (err?.status !== 409) {
+            logger.error('Erreur lors du sync Emby (périodique):', err);
+          }
+        }
+
+        await scheduleNext();
+      }, intervalMs);
+    } catch (err) {
+      logger.error('Erreur lors de la configuration de l\'intervalle sync Emby:', err);
+      embySyncTimeoutId = setTimeout(() => {
+        scheduleNext().catch(() => {});
+      }, 60 * 60 * 1000);
+    }
+  };
+
+  scheduleNext().catch(() => {});
 }
 
 /**
@@ -222,5 +319,6 @@ export default {
   schedulePeriodicRssRefresh,
   scheduleInitialRssRefresh,
   scheduleAutoSearch,
-  scheduleMediaInventoryScan
+  scheduleMediaInventoryScan,
+  scheduleEmbySync
 };

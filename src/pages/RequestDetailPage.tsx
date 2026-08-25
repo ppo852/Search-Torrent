@@ -1,16 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, Search, XCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Search, Trash2, XCircle } from 'lucide-react';
 import { api } from '../services/api';
 import { tmdbAPI } from '../services/tmdb/tmdb';
 import { useAuthStore } from '../stores/authStore';
 import ManualSearchModal from '../components/ManualSearchModal';
-import { formatSize } from '../lib/formatters';
+import { formatSize } from '../utils/formatters';
 import { ExpandableText } from '../components/ui/ExpandableText';
+import { EmptyState } from '../components/ui/EmptyState';
+import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { globalSettings } from '../services/settings';
+import { showErrorToast, showToast } from '../stores/toastStore';
+import { getRequestStatusBadge } from '../lib/request-status-labels';
 
-type MediaType = 'movie' | 'tv' | 'anime';
-type RequestStatus = 'pending' | 'found' | 'sent_to_qbit' | 'error';
+type MediaType = 'movie' | 'tv' | 'anime' | 'animation';
+type RequestStatus = 'pending' | 'found' | 'sent_to_qbit' | 'error' | 'completed' | 'monitoring';
 
 interface LibraryItem {
   id: string;
@@ -45,25 +49,11 @@ interface SearchResultItem {
   incompatible_reason?: string | null;
 }
 
-
-function statusLabel(status?: RequestStatus) {
-  if (status === 'found') return 'Trouvé';
-  if (status === 'sent_to_qbit') return 'Actif';
-  if (status === 'error') return 'Erreur';
-  return 'En attente';
-}
-
-function statusClasses(status?: RequestStatus) {
-  if (status === 'found') return 'bg-green-500/10 text-green-400 border-green-500/20';
-  if (status === 'sent_to_qbit') return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
-  if (status === 'error') return 'bg-red-500/10 text-red-400 border-red-500/20';
-  return 'bg-white/5 text-gray-500 border-white/10';
-}
-
 export function RequestDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const canForce = useAuthStore((s) => !!s.user?.allow_force_interactive_download);
 
   const [item, setItem] = useState<LibraryItem | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -77,6 +67,7 @@ export function RequestDetailPage() {
   const [results, setResults] = useState<SearchResultItem[]>([]);
   const [forceAvailable, setForceAvailable] = useState(false);
   const [autoSearchLoading, setAutoSearchLoading] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
   const load = async () => {
     if (!id) return;
@@ -93,7 +84,7 @@ export function RequestDetailPage() {
         setError('Demande introuvable');
       } else {
         try {
-          const tmdbType = found.media_type === 'movie' ? 'movie' : 'tv';
+          const tmdbType = found.media_type === 'movie' || found.media_type === 'animation' ? 'movie' : 'tv';
           const data = tmdbType === 'movie'
             ? await tmdbAPI.getMovieDetails(String(found.tmdb_id))
             : await tmdbAPI.getTvDetails(String(found.tmdb_id));
@@ -124,14 +115,16 @@ export function RequestDetailPage() {
     }
   };
 
-  const deleteRequest = async () => {
+  const confirmDelete = async () => {
     if (!id) return;
-    if (!window.confirm('Supprimer cette demande ?')) return;
     try {
       await api.deleteLibraryItem(id);
+      showToast('Demande retirée du suivi');
       navigate('/library');
     } catch (e) {
-      setError('Erreur suppression');
+      showErrorToast('Erreur lors de la suppression');
+    } finally {
+      setIsDeleteModalOpen(false);
     }
   };
 
@@ -142,6 +135,8 @@ export function RequestDetailPage() {
     try {
       setIsModalOpen(true);
       setModalLoading(true);
+      setModalError(null);
+      setForceAvailable(false);
       setResults([]);
       const data = await api.searchLibraryRequest(id);
       setResults(data?.results || []);
@@ -160,9 +155,28 @@ export function RequestDetailPage() {
       const updated = await api.sendLibraryRequestToQbit(id);
       setItem(updated);
       setIsModalOpen(false);
+      setForceAvailable(false);
     } catch (e: any) {
-      if (e?.status === 409) { setForceAvailable(true); setModalError('Déjà présent'); }
-      else setModalError('Erreur envoi');
+      if (e?.status === 409) {
+        setModalError('Déjà présent dans la médiathèque');
+        let canForceLive = canForce;
+        if (user?.id) {
+          try {
+            const freshUser = await api.getUser(user.id);
+            canForceLive = !!freshUser?.allow_force_interactive_download;
+            if (canForceLive !== canForce) {
+              useAuthStore.getState().patchUser({
+                allow_force_interactive_download: canForceLive,
+              });
+            }
+          } catch {
+            /* garder la valeur locale */
+          }
+        }
+        setForceAvailable(canForceLive);
+      } else {
+        setModalError('Erreur envoi');
+      }
     }
   };
 
@@ -173,8 +187,19 @@ export function RequestDetailPage() {
       const updated = await api.sendLibraryRequestToQbit(id, { force: true });
       setItem(updated);
       setIsModalOpen(false);
-    } catch (e) { setModalError('Erreur forçage'); }
-    finally { setModalLoading(false); setForceAvailable(false); }
+      setForceAvailable(false);
+      setModalError(null);
+    } catch (e: any) {
+      setModalError(e?.status === 403 ? 'Forçage non autorisé' : 'Erreur forçage');
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  const closeSearchModal = () => {
+    setIsModalOpen(false);
+    setModalError(null);
+    setForceAvailable(false);
   };
 
   if (isLoading) return (
@@ -189,7 +214,20 @@ export function RequestDetailPage() {
       <button onClick={() => navigate('/library')} className="flex items-center gap-2 text-gray-500 hover:text-white mb-8 group transition-all">
         <ArrowLeft size={18} /><span className="font-bold">Retour</span>
       </button>
-      <div className="glass-card p-20 text-center opacity-50"><p className="text-gray-500 font-black uppercase">{error || 'Introuvable'}</p></div>
+      <EmptyState
+        icon={<XCircle size={40} />}
+        title={error || 'Demande introuvable'}
+        description="Cette demande n'existe plus ou a été retirée du suivi."
+        action={
+          <button
+            type="button"
+            onClick={() => navigate('/library')}
+            className="px-6 py-2.5 premium-gradient rounded-xl text-white font-black text-[10px] uppercase tracking-widest shadow-lg shadow-blue-600/20"
+          >
+            Retour à la bibliothèque
+          </button>
+        }
+      />
     </div>
   );
 
@@ -231,7 +269,14 @@ export function RequestDetailPage() {
                     {item.requested_by && <span className="flex items-center gap-2 text-blue-400/60"><CheckCircle2 size={14} />Par {item.requested_by}</span>}
                   </div>
                 </div>
-                <div className={`px-4 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-widest ${statusClasses(item.status)}`}>{statusLabel(item.status)}</div>
+                {(() => {
+                  const badge = getRequestStatusBadge(item.status);
+                  return (
+                    <div className={`px-4 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-widest ${badge.className}`}>
+                      {badge.label}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="space-y-2">
@@ -247,7 +292,7 @@ export function RequestDetailPage() {
                 <button onClick={autoSearch} disabled={autoSearchLoading} className="px-8 py-3 premium-gradient rounded-2xl text-white font-black text-[10px] uppercase tracking-widest shadow-lg shadow-blue-600/20 hover:scale-[1.02] transition-all disabled:opacity-50">
                   {autoSearchLoading ? 'Scan...' : 'Scan Automatique'}
                 </button>
-                <button onClick={deleteRequest} disabled={!canManage} className="p-3 bg-red-600/10 border border-red-600/20 rounded-2xl text-red-400 hover:bg-red-600/20 transition-all disabled:opacity-30"><XCircle size={20} /></button>
+                <button onClick={() => setIsDeleteModalOpen(true)} disabled={!canManage} className="p-3 bg-red-600/10 border border-red-600/20 rounded-2xl text-red-400 hover:bg-red-600/20 transition-all disabled:opacity-30" title="Supprimer"><Trash2 size={20} /></button>
               </div>
             </div>
           </div>
@@ -266,7 +311,7 @@ export function RequestDetailPage() {
 
         <ManualSearchModal
           isOpen={isModalOpen}
-          onClose={() => setIsModalOpen(false)}
+          onClose={closeSearchModal}
           title="Recherche Manuelle"
           subtitle={item.title}
           results={results}
@@ -274,6 +319,15 @@ export function RequestDetailPage() {
           onDownload={downloadResult}
           error={modalError}
           onForceDownload={forceAvailable ? forceDownload : undefined}
+        />
+
+        <ConfirmModal
+          isOpen={isDeleteModalOpen}
+          title="Retirer du suivi ?"
+          message="Cette demande sera supprimée. La surveillance de ce média s'arrêtera."
+          confirmLabel="Supprimer"
+          onConfirm={confirmDelete}
+          onClose={() => setIsDeleteModalOpen(false)}
         />
       </div>
     </div>

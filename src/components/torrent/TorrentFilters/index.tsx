@@ -3,7 +3,9 @@ import { StatusFilter } from './StatusFilter';
 import { CategoryFilter } from './CategoryFilter';
 import { SearchFilter } from './SearchFilter';
 import { SortingFilter } from './SortingFilter';
+import { TrackerFilter } from './TrackerFilter';
 import { TorrentStatus, SortField } from '../../../types/qbittorrent';
+import type { TrackerOption } from '../../../hooks/useTorrentFilters';
 
 interface TorrentFiltersProps {
   searchQuery: string;
@@ -13,6 +15,9 @@ interface TorrentFiltersProps {
   categories: string[];
   currentCategory: string;
   onCategoryChange: (category: string) => void;
+  trackers: TrackerOption[];
+  currentTracker: string;
+  onTrackerChange: (tracker: string) => void;
   currentSortField: SortField;
   sortDirection: 'asc' | 'desc';
   onSortChange: (field: SortField) => void;
@@ -27,6 +32,9 @@ export const TorrentFilters: React.FC<TorrentFiltersProps> = ({
   categories,
   currentCategory,
   onCategoryChange,
+  trackers,
+  currentTracker,
+  onTrackerChange,
   currentSortField,
   sortDirection,
   onSortChange,
@@ -43,28 +51,34 @@ export const TorrentFilters: React.FC<TorrentFiltersProps> = ({
       </div>
       
       {/* Filtres sur la même ligne sur desktop, empilés sur mobile */}
-      <div className="flex flex-col sm:flex-row gap-3 w-full">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 w-full">
         <StatusFilter 
           currentStatus={currentStatus} 
           onStatusChange={onStatusChange} 
-          className="w-full sm:w-1/3"
+          className="w-full"
         />
         <CategoryFilter 
           categories={categories} 
           currentCategory={currentCategory} 
           onCategoryChange={onCategoryChange} 
-          className="w-full sm:w-1/3"
+          className="w-full"
+        />
+        <TrackerFilter
+          trackers={trackers}
+          currentTracker={currentTracker}
+          onTrackerChange={onTrackerChange}
+          className="w-full"
         />
         <SortingFilter 
           currentSortField={currentSortField}
           sortDirection={sortDirection}
           onSortChange={onSortChange}
           onDirectionChange={onDirectionChange}
-          className="w-full sm:w-1/3"
+          className="w-full"
         />
       </div>
     </div>
   );
 };
 
-export { StatusFilter, CategoryFilter, SearchFilter, SortingFilter };
+export { StatusFilter, CategoryFilter, TrackerFilter, SearchFilter, SortingFilter };

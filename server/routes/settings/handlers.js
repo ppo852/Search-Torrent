@@ -2,54 +2,55 @@
 import * as settingsService from '../../services/settings/index.js';
 import schedulerService from '../../services/core/scheduler.js';
 
-// Définition des paramètres disponibles publiquement
-const PUBLIC_SETTINGS = ['prowlarr_url', 'prowlarr_api_key', 'min_seeds', 'tmdb_access_token'];
+// Paramètres exposés aux utilisateurs connectés (sans secrets)
+const PUBLIC_SETTINGS = ['min_seeds'];
+
+async function buildPublicSettingsPayload() {
+  const result = {};
+
+  for (const settingName of PUBLIC_SETTINGS) {
+    const value = await settingsService.getSetting(settingName);
+    if (value !== null) {
+      result[settingName] = value;
+    }
+  }
+
+  const tmdbToken = await settingsService.getSetting('tmdb_access_token');
+  const prowlarrUrl = await settingsService.getSetting('prowlarr_url');
+  const prowlarrKey = await settingsService.getSetting('prowlarr_api_key');
+  const embyUrl = await settingsService.getSetting('emby_url');
+  const embyKey = await settingsService.getSetting('emby_api_key');
+
+  result.tmdb_configured = typeof tmdbToken === 'string' && tmdbToken.length > 0;
+  result.prowlarr_configured =
+    typeof prowlarrUrl === 'string' && prowlarrUrl.length > 0 &&
+    typeof prowlarrKey === 'string' && prowlarrKey.length > 0;
+  result.emby_configured =
+    typeof embyUrl === 'string' && embyUrl.length > 0 &&
+    typeof embyKey === 'string' && embyKey.length > 0;
+
+  return result;
+}
 
 // Paramètres administrateur uniquement
 const ADMIN_ONLY_SETTINGS = [
+  'prowlarr_url',
+  'prowlarr_api_key',
+  'tmdb_access_token',
   'quality_profiles',
   'quality_profile_assignments',
   'auto_search_interval_minutes',
-  'media_movies_path',
-  'media_series_path',
-  'media_anime_path',
   'media_scan_interval_minutes',
-  'media_requests_auto_delete_completed_after_hours'
+  'media_requests_auto_delete_completed_after_hours',
+  'emby_url',
+  'emby_api_key',
+  'emby_library_ids',
+  'emby_sync_interval_minutes'
 ];
 
 // Tous les paramètres
 const ALL_SETTINGS = [...PUBLIC_SETTINGS, ...ADMIN_ONLY_SETTINGS];
 
-export async function getClientSettingsHandler(req, res) {
-  try {
-    const result = {};
-
-    for (const settingName of PUBLIC_SETTINGS) {
-      const value = await settingsService.getSetting(settingName);
-      if (value !== null) {
-        result[settingName] = value;
-      }
-    }
-
-    for (const settingName of ['quality_profiles', 'quality_profile_assignments']) {
-      const value = await settingsService.getSetting(settingName);
-      if (value !== null) {
-        result[settingName] = value;
-      }
-    }
-
-    res.json(result);
-  } catch (error) {
-    console.error('Erreur lors de la récupération des paramètres client:', error);
-    res.status(500).json({ error: 'Une erreur est survenue lors de la récupération des paramètres' });
-  }
-}
-
-/**
- * Récupère tous les paramètres de l'application
- * @param {Object} req - Requête Express
- * @param {Object} res - Réponse Express
- */
 export async function getAllSettingsHandler(req, res) {
   try {
     const settings = await settingsService.getAllSettings();
@@ -92,17 +93,7 @@ export async function getGlobalSettingsHandler(req, res) {
  */
 export async function getPublicSettingsHandler(req, res) {
   try {
-    // Récupérer uniquement les paramètres publics
-    const result = {};
-
-    // Récupérer chaque paramètre public individuellement
-    for (const settingName of PUBLIC_SETTINGS) {
-      const value = await settingsService.getSetting(settingName);
-      if (value !== null) {
-        result[settingName] = value;
-      }
-    }
-
+    const result = await buildPublicSettingsPayload();
     res.json(result);
   } catch (error) {
     console.error('Erreur lors de la récupération des paramètres publics:', error);
@@ -198,26 +189,40 @@ export async function updateGlobalSettingsHandler(req, res) {
       const profileIds = new Set(nextProfiles.map(p => p?.id).filter(Boolean));
 
       const movieProfileId = nextAssignments.movie_profile_id;
+      const animationProfileId = nextAssignments.animation_profile_id;
       const tvProfileId = nextAssignments.tv_profile_id;
+      const animeProfileId = nextAssignments.anime_profile_id;
 
       if (movieProfileId && !profileIds.has(movieProfileId)) {
         return res.status(400).json({ error: 'Profil assigné aux films introuvable (movie_profile_id)' });
       }
 
+      if (animationProfileId && !profileIds.has(animationProfileId)) {
+        return res.status(400).json({ error: 'Profil assigné à l\'animation introuvable (animation_profile_id)' });
+      }
+
       if (tvProfileId && !profileIds.has(tvProfileId)) {
-        return res.status(400).json({ error: 'Profil assigné aux séries/anime introuvable (tv_profile_id)' });
+        return res.status(400).json({ error: 'Profil assigné aux séries introuvable (tv_profile_id)' });
+      }
+
+      if (animeProfileId && !profileIds.has(animeProfileId)) {
+        return res.status(400).json({ error: 'Profil assigné à l\'anime introuvable (anime_profile_id)' });
       }
 
       // Option A: interdire suppression d'un profil assigné
-      const currentMovieProfileId = currentAssignments?.movie_profile_id;
-      const currentTvProfileId = currentAssignments?.tv_profile_id;
+      const assignedIds = [
+        currentAssignments?.movie_profile_id,
+        currentAssignments?.animation_profile_id,
+        currentAssignments?.tv_profile_id,
+        currentAssignments?.anime_profile_id,
+      ].filter(Boolean);
 
-      if (currentMovieProfileId && Object.prototype.hasOwnProperty.call(settings, 'quality_profiles') && !profileIds.has(currentMovieProfileId)) {
-        return res.status(400).json({ error: 'Suppression interdite: le profil Film est actuellement assigné' });
-      }
-
-      if (currentTvProfileId && Object.prototype.hasOwnProperty.call(settings, 'quality_profiles') && !profileIds.has(currentTvProfileId)) {
-        return res.status(400).json({ error: 'Suppression interdite: le profil Série/Anime est actuellement assigné' });
+      if (Object.prototype.hasOwnProperty.call(settings, 'quality_profiles')) {
+        for (const id of assignedIds) {
+          if (!profileIds.has(id)) {
+            return res.status(400).json({ error: 'Suppression interdite: un profil actuellement assigné serait supprimé' });
+          }
+        }
       }
     }
 
@@ -235,25 +240,20 @@ export async function updateGlobalSettingsHandler(req, res) {
       }
     }
 
-    if (Object.prototype.hasOwnProperty.call(settings, 'media_movies_path')) {
-      const v = settings.media_movies_path;
-      if (typeof v !== 'string') {
-        return res.status(400).json({ error: 'media_movies_path doit être une chaîne' });
+    if (Object.prototype.hasOwnProperty.call(settings, 'emby_library_ids')) {
+      const v = settings.emby_library_ids;
+      if (!Array.isArray(v) || v.some((id) => typeof id !== 'string' && typeof id !== 'number')) {
+        return res.status(400).json({ error: 'emby_library_ids doit être un tableau d\'identifiants' });
       }
+      settings.emby_library_ids = v.map(String);
     }
 
-    if (Object.prototype.hasOwnProperty.call(settings, 'media_series_path')) {
-      const v = settings.media_series_path;
-      if (typeof v !== 'string') {
-        return res.status(400).json({ error: 'media_series_path doit être une chaîne' });
+    if (Object.prototype.hasOwnProperty.call(settings, 'emby_sync_interval_minutes')) {
+      const n = Number(settings.emby_sync_interval_minutes);
+      if (!Number.isFinite(n) || n < 5) {
+        return res.status(400).json({ error: 'emby_sync_interval_minutes doit être >= 5' });
       }
-    }
-
-    if (Object.prototype.hasOwnProperty.call(settings, 'media_anime_path')) {
-      const v = settings.media_anime_path;
-      if (typeof v !== 'string') {
-        return res.status(400).json({ error: 'media_anime_path doit être une chaîne' });
-      }
+      settings.emby_sync_interval_minutes = Math.round(n);
     }
 
     for (const [key, value] of Object.entries(settings)) {
@@ -270,14 +270,22 @@ export async function updateGlobalSettingsHandler(req, res) {
       }
     }
 
+    if (Object.prototype.hasOwnProperty.call(settings, 'media_scan_interval_minutes')) {
+      try {
+        schedulerService.scheduleMediaInventoryScan(0, { skipInitial: true });
+      } catch {
+        // ignore
+      }
+    }
+
     if (
-      Object.prototype.hasOwnProperty.call(settings, 'media_scan_interval_minutes') ||
-      Object.prototype.hasOwnProperty.call(settings, 'media_movies_path') ||
-      Object.prototype.hasOwnProperty.call(settings, 'media_series_path') ||
-      Object.prototype.hasOwnProperty.call(settings, 'media_anime_path')
+      Object.prototype.hasOwnProperty.call(settings, 'emby_sync_interval_minutes') ||
+      Object.prototype.hasOwnProperty.call(settings, 'emby_library_ids') ||
+      Object.prototype.hasOwnProperty.call(settings, 'emby_url') ||
+      Object.prototype.hasOwnProperty.call(settings, 'emby_api_key')
     ) {
       try {
-        schedulerService.scheduleMediaInventoryScan(0);
+        schedulerService.scheduleEmbySync();
       } catch {
         // ignore
       }

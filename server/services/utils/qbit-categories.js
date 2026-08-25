@@ -49,6 +49,7 @@ export function normalizeQbitCategory(value) {
  */
 export function inferQbitCategoryFromMediaType(mediaType) {
   if (mediaType === 'movie') return QBIT_CATEGORIES.MOVIES;
+  if (mediaType === 'animation') return QBIT_CATEGORIES.ANIMATION;
   if (mediaType === 'anime') return QBIT_CATEGORIES.ANIME;
   if (mediaType === 'tv') return QBIT_CATEGORIES.TV;
   if (mediaType === 'music') return QBIT_CATEGORIES.MUSIC;

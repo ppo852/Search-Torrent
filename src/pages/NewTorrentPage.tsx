@@ -6,25 +6,24 @@ import { ResultCard } from '../components/ui/ResultCard';
 import { SortControls } from '../components/ui/SortControls';
 import { RssFeedList } from '../components/rss/RssFeedList';
 import { MediaGrid } from '../components/ui/MediaGrid';
-import { Toast } from '../components/core/Toast';
+import { EmptyState } from '../components/ui/EmptyState';
 import type { SearchResult, SortOption, CategoryType } from '../types';
 import { tmdbAPI } from '../services/tmdb/tmdb';
 import { globalSettings } from '../services/settings';
 import { Search, Rss, ChevronRight, ChevronLeft } from 'lucide-react';
 import { useInteractiveTorrentDownload } from '../hooks/useInteractiveTorrentDownload';
+import { useRequestStatus } from '../hooks/useRequestStatus';
+import { filterTmdbBySearchCategory, hasTmdbAnimationGenre } from '../lib/tmdb-category-filter';
 
 export function NewTorrentPage() {
   const [sortOption, setSortOption] = useState<SortOption>('size');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 25;
   const { results, isLoading, error, lastSearchCategory, tmdbResults, setResults, setIsLoading, setError, setLastSearchCategory, setTmdbResults, setLastSearchQuery } = useSearchStore();
+  const { getPosterBadges } = useRequestStatus();
 
-  const { download, confirmModal } = useInteractiveTorrentDownload({
-    onSuccess: (msg) => setToastMessage(msg),
-    onError: (msg) => setToastMessage(msg),
-  });
+  const { download, confirmModal } = useInteractiveTorrentDownload();
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -43,15 +42,15 @@ export function NewTorrentPage() {
     setLastSearchQuery(query);
     setCurrentPage(1);
     try {
-      if (category === 'movies') {
+      if (category === 'movies' || category === 'animation') {
         const suggestions = await tmdbAPI.searchSuggestions(query, 'movie');
-        setTmdbResults(suggestions);
+        setTmdbResults(filterTmdbBySearchCategory(suggestions, category));
         setResults([]);
         return;
       }
       if (category === 'tv' || category === 'anime') {
         const suggestions = await tmdbAPI.searchSuggestions(query, 'tv');
-        setTmdbResults(suggestions);
+        setTmdbResults(filterTmdbBySearchCategory(suggestions, category));
         setResults([]);
         return;
       }
@@ -74,6 +73,7 @@ export function NewTorrentPage() {
 
     const mediaType =
       lastSearchCategory === 'movies' ? 'movie'
+      : lastSearchCategory === 'animation' ? 'animation'
       : lastSearchCategory === 'tv' ? 'tv'
       : lastSearchCategory === 'anime' ? 'anime'
       : lastSearchCategory === 'music' ? 'music'
@@ -84,7 +84,7 @@ export function NewTorrentPage() {
       name: result.name,
       itemCategory: result.category,
       categoryId: result.categoryId,
-      mediaType: mediaType as 'movie' | 'tv' | 'anime' | 'music' | 'books' | undefined,
+      mediaType: mediaType as 'movie' | 'tv' | 'anime' | 'animation' | 'music' | 'books' | undefined,
       searchContext: lastSearchCategory === 'software' ? 'software' : undefined,
       tags: indexerTag ? [indexerTag] : undefined,
     });
@@ -127,7 +127,7 @@ export function NewTorrentPage() {
           <p className="text-red-400 font-black uppercase text-sm tracking-widest">{error}</p>
           <button onClick={() => window.location.reload()} className="px-6 py-2 bg-white/5 border border-white/10 rounded-xl text-gray-500 font-black text-[10px] uppercase tracking-widest hover:text-white transition-all">Réessayer</button>
         </div>
-      ) : (lastSearchCategory === 'movies' || lastSearchCategory === 'tv' || lastSearchCategory === 'anime') ? (
+      ) : (lastSearchCategory === 'movies' || lastSearchCategory === 'animation' || lastSearchCategory === 'tv' || lastSearchCategory === 'anime') ? (
         tmdbResults.length > 0 ? (
           <div className="space-y-10">
             <div className="flex items-center gap-6">
@@ -135,10 +135,23 @@ export function NewTorrentPage() {
               <h2 className="text-sm font-black text-gray-500 tracking-[0.4em] uppercase whitespace-nowrap">Suggestions TMDB</h2>
               <div className="h-0.5 flex-1 bg-gradient-to-r from-transparent via-white/5 to-transparent" />
             </div>
-            <MediaGrid items={tmdbResults} category={lastSearchCategory} />
+            <MediaGrid
+              items={tmdbResults}
+              category={lastSearchCategory}
+              getPosterBadges={(item) => {
+                const isAnime =
+                  item.type === 'tv' &&
+                  (lastSearchCategory === 'anime' || hasTmdbAnimationGenre(item));
+                return getPosterBadges(item.id, item.type, isAnime, item.title);
+              }}
+            />
           </div>
         ) : lastSearchCategory && (
-          <div className="py-32 glass-card text-center opacity-30"><p className="text-gray-500 font-black uppercase text-xs tracking-widest">Aucun résultat TMDB</p></div>
+          <EmptyState
+            icon={<Search size={40} />}
+            title="Aucun résultat TMDB"
+            description="Essayez un autre titre ou vérifiez l'orthographe."
+          />
         )
       ) : results.length > 0 ? (
         <div className="space-y-8">
@@ -160,6 +173,7 @@ export function NewTorrentPage() {
                 lastSearchCategory === 'movies' ? 'movie'
                 : lastSearchCategory === 'tv' ? 'tv'
                 : lastSearchCategory === 'anime' ? 'anime'
+                : lastSearchCategory === 'animation' ? 'animation'
                 : lastSearchCategory === 'music' ? 'music'
                 : lastSearchCategory === 'books' ? 'books'
                 : undefined
@@ -183,9 +197,12 @@ export function NewTorrentPage() {
           <RssFeedList />
         </div>
       ) : (
-        <div className="py-32 glass-card text-center opacity-30"><p className="text-gray-500 font-black uppercase text-xs tracking-widest">Aucun signal détecté</p></div>
+        <EmptyState
+          icon={<Search size={40} />}
+          title="Aucun torrent trouvé"
+          description="Modifiez votre requête ou essayez une autre catégorie."
+        />
       )}
-      {toastMessage && <Toast message={toastMessage} onClose={() => setToastMessage(null)} />}
       {confirmModal}
     </div>
   );

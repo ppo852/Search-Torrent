@@ -5,21 +5,14 @@ import qBittorrentService from '../../services/qbittorrent/index.js';
 import { resolveQbitCategory } from '../../services/utils/qbit-categories.js';
 import logger from '../../services/core/logger.js';
 import { checkInteractiveInventoryDuplicate } from '../../services/qbittorrent/inventory-guard.js';
+import { logActivity } from '../../services/activity-log/index.js';
 
-async function getQbitContextForUserId(req, userId) {
-  const user = await qBittorrentService.getQBitUserInfo(req.app.locals.db, userId);
-  if (!user?.qbit_url) {
-    return { user, qbitUrl: null, cookies: '' };
+async function getQbitContextForUserId(_req, userId) {
+  try {
+    return await qBittorrentService.getAuthenticatedQbitConfig(userId);
+  } catch {
+    return { qbitUrl: null, headers: {} };
   }
-
-  const qbitUrl = user.qbit_url.trim().replace(/\/+$/, '');
-  let cookies = '';
-
-  if (user.qbit_username && user.qbit_password) {
-    cookies = await qBittorrentService.authenticateQBittorrent(qbitUrl, user.qbit_username, user.qbit_password, userId);
-  }
-
-  return { user, qbitUrl, cookies };
 }
 
 async function getQbitContext(req) {
@@ -35,18 +28,16 @@ export async function getTorrentsHandler(req, res) {
     // console.log('Type de req.user.id:', typeof req.user.id);
     // console.log('Instance de DB utilisée:', req.app.locals.db ? 'DB définie' : 'DB non définie');
     
-    const { user, qbitUrl, cookies } = await getQbitContext(req);
+    const { qbitUrl, headers } = await getQbitContext(req);
 
-    if (!user?.qbit_url || !qbitUrl) {
-      // console.log('URL qBittorrent non configurée pour l\'utilisateur');
+    if (!qbitUrl) {
       return res.status(400).json({ error: 'URL qBittorrent non configurée' });
     }
 
-    // console.log('Envoi requête vers:', `${qbitUrl}/api/v2/torrents/info`);
+    // console.log('Envoi requête vers:', `${qbitUrl}/api/v2/torrents/info');
     const data = await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/info`, {
       headers: {
-        'Cookie': cookies,
-        'Referer': qbitUrl
+        ...headers
       }
     });
     
@@ -67,8 +58,8 @@ export async function deleteTorrentHandler(req, res) {
       return res.status(400).json({ error: 'Hash du torrent requis' });
     }
 
-    const { user, qbitUrl, cookies } = await getQbitContext(req);
-    if (!user?.qbit_url || !qbitUrl) {
+    const { qbitUrl, headers } = await getQbitContext(req);
+    if (!qbitUrl) {
       return res.status(400).json({ error: 'URL qBittorrent non configurée' });
     }
 
@@ -84,8 +75,7 @@ export async function deleteTorrentHandler(req, res) {
       method: 'POST',
       body: params,
       headers: {
-        'Cookie': cookies,
-        'Referer': qbitUrl,
+        ...headers,
         'Content-Type': 'application/x-www-form-urlencoded'
       }
     });
@@ -102,15 +92,14 @@ export async function deleteTorrentHandler(req, res) {
 export async function getTorrentDetailsHandler(req, res) {
   try {
     const { hash } = req.params;
-    const { user, qbitUrl, cookies } = await getQbitContext(req);
-    if (!user?.qbit_url || !qbitUrl) {
+    const { qbitUrl, headers } = await getQbitContext(req);
+    if (!qbitUrl) {
       return res.status(400).json({ error: 'URL qBittorrent non configurée' });
     }
 
     const data = await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/properties?hash=${hash}`, {
       headers: {
-        'Cookie': cookies,
-        'Referer': qbitUrl
+        ...headers
       }
     });
 
@@ -125,11 +114,7 @@ export async function getTorrentDetailsHandler(req, res) {
  */
 export async function getMainDataHandler(req, res) {
   try {
-    const { user, qbitUrl, cookies } = await getQbitContext(req);
-
-    if (!user?.qbit_url) {
-      return res.status(400).json({ error: 'URL qBittorrent non configurée' });
-    }
+    const { qbitUrl, headers } = await getQbitContext(req);
 
     if (!qbitUrl) {
       return res.status(400).json({ error: 'URL qBittorrent non configurée' });
@@ -137,8 +122,7 @@ export async function getMainDataHandler(req, res) {
 
     const data = await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/sync/maindata`, {
       headers: {
-        'Cookie': cookies,
-        'Referer': qbitUrl
+        ...headers
       }
     });
 
@@ -157,15 +141,14 @@ export async function getMainDataHandler(req, res) {
  */
 export async function getCategoriesHandler(req, res) {
   try {
-    const { user, qbitUrl, cookies } = await getQbitContext(req);
-    if (!user?.qbit_url || !qbitUrl) {
+    const { qbitUrl, headers } = await getQbitContext(req);
+    if (!qbitUrl) {
       return res.status(400).json({ error: 'URL qBittorrent non configurée' });
     }
 
     const categories = await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/categories`, {
       headers: {
-        'Cookie': cookies,
-        'Referer': qbitUrl
+        ...headers
       }
     });
 
@@ -182,8 +165,8 @@ export async function getCategoriesHandler(req, res) {
 export async function addTorrentHandler(req, res) {
   try {
     // Récupérer les infos utilisateur/qBittorrent
-    const { user, qbitUrl, cookies } = await getQbitContext(req);
-    if (!user?.qbit_url || !qbitUrl) {
+    const { qbitUrl, headers } = await getQbitContext(req);
+    if (!qbitUrl) {
       return res.status(400).json({ error: 'URL qBittorrent non configurée' });
     }
 
@@ -222,18 +205,50 @@ export async function addTorrentHandler(req, res) {
 
     const torrentName = req.body.name || (req.body.options && req.body.options.name);
     const force = !!(req.body?.force);
+    const tmdbId = req.body?.tmdb_id ?? req.body?.tmdbId ?? req.body?.options?.tmdb_id;
+    const mediaType =
+      req.body?.mediaType ||
+      req.body?.media_type ||
+      req.body?.options?.mediaType ||
+      req.body?.options?.media_type;
+    const seasonNumber =
+      req.body?.season_number ??
+      req.body?.seasonNumber ??
+      req.body?.options?.season_number ??
+      req.body?.options?.seasonNumber;
+    const episodeNumber =
+      req.body?.episode_number ??
+      req.body?.episodeNumber ??
+      req.body?.options?.episode_number ??
+      req.body?.options?.episodeNumber;
 
-    if (category) {
-      category = resolveQbitCategory(category) || category;
+    if (category || mediaType) {
+      category = resolveQbitCategory(category, mediaType) || category;
     }
 
     const inventoryCheck = await checkInteractiveInventoryDuplicate({
       torrentName,
       force,
-      userId: req.user.id
+      userId: req.user.id,
+      tmdbId,
+      mediaType,
+      seasonNumber,
+      episodeNumber,
     });
 
     if (inventoryCheck.blocked) {
+      await logActivity({
+        eventType: 'download.blocked_inventory',
+        actorUsername: req.user?.username || null,
+        targetLabel: torrentName || 'Torrent',
+        details: {
+          error: inventoryCheck.error,
+          details: inventoryCheck.details,
+          tmdb_id: tmdbId ?? null,
+          media_type: mediaType || null,
+          forced: force,
+        },
+      });
       return res.status(inventoryCheck.status || 409).json({
         success: false,
         error: inventoryCheck.error,
@@ -265,14 +280,6 @@ export async function addTorrentHandler(req, res) {
         tags
       });
 
-      // Vérification que la session est toujours valide
-      await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/app/version`, {
-        headers: {
-          'Cookie': cookies,
-          'Referer': qbitUrl
-        }
-      });
-
       return res.json({ success: true, message: 'Torrents ajoutés avec succès', qbResponse });
     }
 
@@ -285,8 +292,7 @@ export async function addTorrentHandler(req, res) {
       method: 'POST',
       body: formData,
       headers: {
-        'Cookie': cookies,
-        'Referer': qbitUrl
+        ...headers
       }
     });
 
@@ -297,14 +303,6 @@ export async function addTorrentHandler(req, res) {
         qbResponse
       });
     }
-
-    // Vérification que la session est toujours valide
-    await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/app/version`, {
-      headers: {
-        'Cookie': cookies,
-        'Referer': qbitUrl
-      }
-    });
 
     res.json({ success: true, message: 'Torrents ajoutés avec succès', qbResponse });
   } catch (error) {
@@ -323,16 +321,16 @@ export async function reannounceHandler(req, res) {
       return res.status(400).json({ error: 'Hash du torrent requis' });
     }
 
-    const user = await qBittorrentService.getQBitUserInfo(req.app.locals.db, req.user.id);
-    const qbitUrl = user.qbit_url.replace(/\/+$/, '');
-    const cookies = await qBittorrentService.authenticateQBittorrent(qbitUrl, user.qbit_username, user.qbit_password);
+    const { qbitUrl, headers } = await getQbitContext(req);
+    if (!qbitUrl) {
+      return res.status(400).json({ error: 'URL qBittorrent non configurée' });
+    }
 
     await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/reannounce`, {
       method: 'POST',
       headers: {
-        'Cookie': cookies,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Referer': qbitUrl
+        ...headers,
+        'Content-Type': 'application/x-www-form-urlencoded'
       },
       body: new URLSearchParams({ hashes })
     });
@@ -353,16 +351,16 @@ export async function recheckHandler(req, res) {
       return res.status(400).json({ error: 'Hash du torrent requis' });
     }
 
-    const user = await qBittorrentService.getQBitUserInfo(req.app.locals.db, req.user.id);
-    const qbitUrl = user.qbit_url.replace(/\/+$/, '');
-    const cookies = await qBittorrentService.authenticateQBittorrent(qbitUrl, user.qbit_username, user.qbit_password);
+    const { qbitUrl, headers } = await getQbitContext(req);
+    if (!qbitUrl) {
+      return res.status(400).json({ error: 'URL qBittorrent non configurée' });
+    }
 
     await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/recheck`, {
       method: 'POST',
       headers: {
-        'Cookie': cookies,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Referer': qbitUrl
+        ...headers,
+        'Content-Type': 'application/x-www-form-urlencoded'
       },
       body: new URLSearchParams({ hashes })
     });
@@ -370,6 +368,60 @@ export async function recheckHandler(req, res) {
     res.json({ message: 'Vérification lancée' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+}
+
+/**
+ * Exporte le fichier .torrent (proxy qBit /torrents/export)
+ */
+export async function exportTorrentHandler(req, res) {
+  try {
+    const hash = String(req.query.hash || '').trim();
+    if (!hash || hash.includes('|')) {
+      return res.status(400).json({ error: 'Un seul hash torrent est requis' });
+    }
+
+    const { qbitUrl, headers } = await getQbitContext(req);
+    if (!qbitUrl) {
+      return res.status(400).json({ error: 'URL qBittorrent non configurée' });
+    }
+
+    const response = await fetch(
+      `${qbitUrl}/api/v2/torrents/export?hash=${encodeURIComponent(hash)}`,
+      { headers }
+    );
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      if (response.status === 404) {
+        return res.status(404).json({
+          error: 'Fichier .torrent non exportable (souvent un magnet sans .torrent stocké)',
+        });
+      }
+      return res.status(502).json({
+        error: `Échec export qBittorrent: ${response.status}${errText ? ` — ${errText}` : ''}`,
+      });
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const rawName = String(req.query.name || hash)
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+      .replace(/\.torrent$/i, '')
+      .trim()
+      .slice(0, 120);
+    const safeName = rawName || hash;
+    const filename = `${safeName}.torrent`;
+
+    res.setHeader('Content-Type', 'application/x-bittorrent');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${filename.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(filename)}`
+    );
+    res.send(buffer);
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Erreur export torrent',
+    });
   }
 }
 
@@ -383,13 +435,10 @@ export async function pauseHandler(req, res) {
       return res.status(400).json({ error: 'Hash du torrent requis' });
     }
 
-    const user = await qBittorrentService.getQBitUserInfo(req.app.locals.db, req.user.id);
-    if (!user?.qbit_url) {
+    const { qbitUrl, headers } = await getQbitContext(req);
+    if (!qbitUrl) {
       return res.status(400).json({ error: 'URL qBittorrent non configurée' });
     }
-
-    const qbitUrl = user.qbit_url.replace(/\/+$/, '');
-    const cookies = await qBittorrentService.authenticateQBittorrent(qbitUrl, user.qbit_username, user.qbit_password);
 
     // Formatage du hash pour qBittorrent
     const formattedHashes = Array.isArray(hashes) ? hashes.join('|') : hashes;
@@ -400,9 +449,8 @@ export async function pauseHandler(req, res) {
     const responseText = await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/stop`, {
       method: 'POST',
       headers: {
-        'Cookie': cookies,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Referer': qbitUrl
+        ...headers,
+        'Content-Type': 'application/x-www-form-urlencoded'
       },
       body: params
     });
@@ -427,13 +475,10 @@ export async function createCategoryHandler(req, res) {
       return res.status(400).json({ error: 'Nom de catégorie requis' });
     }
 
-    const user = await qBittorrentService.getQBitUserInfo(req.app.locals.db, req.user.id);
-    if (!user?.qbit_url) {
+    const { qbitUrl, headers } = await getQbitContext(req);
+    if (!qbitUrl) {
       return res.status(400).json({ error: 'URL qBittorrent non configurée' });
     }
-
-    const qbitUrl = user.qbit_url.replace(/\/+$/, '');
-    const cookies = await qBittorrentService.authenticateQBittorrent(qbitUrl, user.qbit_username, user.qbit_password);
 
     const params = new URLSearchParams();
     params.append('category', category);
@@ -441,9 +486,8 @@ export async function createCategoryHandler(req, res) {
     await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/createCategory`, {
       method: 'POST',
       headers: {
-        'Cookie': cookies,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Referer': qbitUrl
+        ...headers,
+        'Content-Type': 'application/x-www-form-urlencoded'
       },
       body: params
     });
@@ -465,13 +509,10 @@ export async function resumeHandler(req, res) {
       return res.status(400).json({ error: 'Hash du torrent requis' });
     }
 
-    const user = await qBittorrentService.getQBitUserInfo(req.app.locals.db, req.user.id);
-    if (!user?.qbit_url) {
+    const { qbitUrl, headers } = await getQbitContext(req);
+    if (!qbitUrl) {
       return res.status(400).json({ error: 'URL qBittorrent non configurée' });
     }
-
-    const qbitUrl = user.qbit_url.replace(/\/+$/, '');
-    const cookies = await qBittorrentService.authenticateQBittorrent(qbitUrl, user.qbit_username, user.qbit_password);
 
     // Formatage du hash pour qBittorrent
     const formattedHashes = Array.isArray(hashes) ? hashes.join('|') : hashes;
@@ -481,9 +522,8 @@ export async function resumeHandler(req, res) {
     const responseText = await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/start`, {
       method: 'POST',
       headers: {
-        'Cookie': cookies,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Referer': qbitUrl
+        ...headers,
+        'Content-Type': 'application/x-www-form-urlencoded'
       },
       body: params
     });

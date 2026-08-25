@@ -31,7 +31,7 @@ export interface Config {
 
 export type SortOption = 'name' | 'size' | 'seeds' | 'leech' | 'date';
 
-export type CategoryType = 'all' | 'movies' | 'tv' | 'anime' | 'music' | 'software' | 'books';
+export type CategoryType = 'all' | 'movies' | 'tv' | 'anime' | 'animation' | 'music' | 'software' | 'books';
 
 export interface TmdbResult {
   id: number;

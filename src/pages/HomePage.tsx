@@ -6,6 +6,7 @@ import { MediaSection } from '../components/ui/MediaSection';
 import { RssTrackerHome } from '../components/home/RssRecentRow';
 import { formatYear } from '../utils/formatters';
 import type { TmdbResult } from '../types';
+import { useRequestStatus } from '../hooks/useRequestStatus';
 
 async function fetchNewestMedia(): Promise<TmdbResult[]> {
   const token = useAuthStore.getState().token;
@@ -36,6 +37,7 @@ export function HomePage() {
 
   const trendingMovies = newestMedia.filter((m: any) => m.type === 'movie');
   const trendingShows = newestMedia.filter((m: any) => m.type === 'tv');
+  const { getPosterBadges } = useRequestStatus();
 
   // Prendre les 10 premiers médias avec backdrop pour le carrousel
   const heroMedias = newestMedia.filter((m: any) => m.backdropPath).slice(0, 10);
@@ -147,12 +149,14 @@ export function HomePage() {
               title="Films Tendance"
               items={trendingMovies}
               onMediaClick={handleMediaClick}
+              getPosterBadges={(media) => getPosterBadges(media.id, media.type, false, media.title)}
             />
 
             <MediaSection
               title="Séries Tendance"
               items={trendingShows}
               onMediaClick={handleMediaClick}
+              getPosterBadges={(media) => getPosterBadges(media.id, media.type, false, media.title)}
             />
           </>
         )}

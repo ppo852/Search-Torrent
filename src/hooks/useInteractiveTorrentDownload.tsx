@@ -2,23 +2,24 @@ import { useState, useCallback } from 'react';
 import { useAuthStore } from '../stores/authStore';
 import { api } from '../services/api';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
+import { showErrorToast, showInfoToast, showToast, isSoftApiError, getApiErrorMessage } from '../stores/toastStore';
 
 export interface InteractiveDownloadParams {
   url: string;
   name?: string;
   itemCategory?: string;
   categoryId?: number;
-  mediaType?: 'movie' | 'tv' | 'anime' | 'music' | 'books';
+  mediaType?: 'movie' | 'tv' | 'anime' | 'animation' | 'music' | 'books';
   searchContext?: 'software';
   tags?: string[];
+  /** TMDB de la fiche (pochette) — anti-doublon fiable */
+  tmdbId?: number;
+  /** Contexte explicite (pack saison sans SxxEyy dans le nom) */
+  seasonNumber?: number;
+  episodeNumber?: number;
 }
 
-interface UseInteractiveTorrentDownloadOptions {
-  onSuccess?: (message: string) => void;
-  onError?: (message: string) => void;
-}
-
-export function useInteractiveTorrentDownload(options: UseInteractiveTorrentDownloadOptions = {}) {
+export function useInteractiveTorrentDownload() {
   const userId = useAuthStore((s) => s.user?.id);
   const canForce = useAuthStore((s) => !!s.user?.allow_force_interactive_download);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -35,13 +36,15 @@ export function useInteractiveTorrentDownload(options: UseInteractiveTorrentDown
         params.mediaType,
         params.tags,
         force,
-        params.searchContext
+        params.searchContext,
+        params.tmdbId,
+        params.seasonNumber,
+        params.episodeNumber
       );
-      options.onSuccess?.('Envoi vers qBittorrent réussi !');
+      showToast('Envoi vers qBittorrent réussi !');
       return true;
     } catch (error: any) {
-      const isDuplicate =
-        error?.status === 409 || error?.data?.error === 'Déjà présent dans la médiathèque';
+      const isDuplicate = isSoftApiError(error) && (error?.status === 409 || /déjà présent/i.test(getApiErrorMessage(error, '')));
 
       let canForceLive = canForce;
       if (isDuplicate && !force && userId) {
@@ -66,13 +69,13 @@ export function useInteractiveTorrentDownload(options: UseInteractiveTorrentDown
       }
 
       if (isDuplicate) {
-        options.onError?.('Déjà présent dans la médiathèque');
+        showInfoToast('Ce média est déjà dans la médiathèque');
       } else {
-        options.onError?.(error?.data?.error || error?.message || 'Échec du transfert');
+        showErrorToast(getApiErrorMessage(error, 'Échec du transfert'));
       }
       return false;
     }
-  }, [canForce, options, userId]);
+  }, [canForce, userId]);
 
   const handleConfirmForce = useCallback(async () => {
     if (!pending) return;
@@ -91,7 +94,7 @@ export function useInteractiveTorrentDownload(options: UseInteractiveTorrentDown
     <ConfirmModal
       isOpen={showConfirm}
       title="Média déjà présent"
-      message={`« ${pendingName} » semble déjà être dans la médiathèque. Voulez-vous quand même lancer le téléchargement ?`}
+      message={`« ${pendingName} » semble déjà être dans la médiathèque (disque ou Emby). Voulez-vous quand même lancer le téléchargement ?`}
       confirmLabel="Forcer"
       cancelLabel="Annuler"
       onConfirm={handleConfirmForce}

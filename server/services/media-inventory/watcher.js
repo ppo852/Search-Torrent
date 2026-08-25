@@ -140,6 +140,7 @@ export async function startMediaWatcher() {
       addPaths(u.download_path_movies);
       addPaths(u.download_path_series);
       addPaths(u.download_path_anime);
+      addPaths(u.download_path_animation);
     }
   } catch (err) {
     console.error('[MediaWatcher] Failed to fetch user paths:', err);

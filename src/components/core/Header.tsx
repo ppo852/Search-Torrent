@@ -95,7 +95,7 @@ export function Header() {
                   <Link
                     to="/admin"
                     className="text-gray-400 hover:text-gray-200 transition-colors"
-                    title="Paramètres administrateur"
+                    title="Paramètres"
                   >
                     <Settings size={20} />
                   </Link>
@@ -173,7 +173,7 @@ export function Header() {
                         <Link
                           to="/admin"
                           className="p-2 text-gray-400 hover:text-gray-200 hover:bg-gray-700 rounded-md transition-colors"
-                          title="Paramètres administrateur"
+                          title="Paramètres"
                           onClick={() => setMobileMenuOpen(false)}
                         >
                           <Settings size={22} />

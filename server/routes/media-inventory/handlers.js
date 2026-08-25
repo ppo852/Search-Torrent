@@ -1,6 +1,12 @@
 import mediaInventoryService from '../../services/media-inventory/index.js';
-import { getSetting } from '../../services/settings/index.js';
 import { updateDownloadingEpisodesStatus } from '../../services/media-inventory/episode-status.js';
+import {
+  INVENTORY_JOB_DISK_SCAN,
+  getInventoryJobLock,
+  releaseInventoryJob,
+  tryAcquireInventoryJob,
+} from '../../services/core/inventory-job-lock.js';
+import { withDbExclusive, run } from '../../services/core/db.js';
 
 let scanJob = {
   running: false,
@@ -20,12 +26,18 @@ function parseYearFromReleaseDate(value) {
 
 export async function scanMediaInventoryNowHandler(req, res) {
   try {
-    if (scanJob.running) {
-      return res.status(409).json({
-        success: false,
-        error: 'Scan déjà en cours',
-        status: scanJob
-      });
+    try {
+      tryAcquireInventoryJob(INVENTORY_JOB_DISK_SCAN);
+    } catch (lockErr) {
+      if (lockErr?.status === 409) {
+        return res.status(409).json({
+          success: false,
+          error: lockErr.message,
+          busy: getInventoryJobLock(),
+          status: scanJob
+        });
+      }
+      throw lockErr;
     }
 
     const { force } = req.body || {};
@@ -43,13 +55,12 @@ export async function scanMediaInventoryNowHandler(req, res) {
     (async () => {
       try {
         if (force) {
-          const { run } = await import('../../services/core/db.js');
-          await run('DELETE FROM local_media_inventory');
+          await withDbExclusive(async () => {
+            await run('DELETE FROM local_media_inventory');
+          });
         }
-        
-        // The scanNow service automatically collects paths from all users
-        const result = await mediaInventoryService.scanNow();
 
+        const result = await mediaInventoryService.scanNow();
         const updatedEpisodes = await updateDownloadingEpisodesStatus();
 
         scanJob.running = false;
@@ -62,18 +73,25 @@ export async function scanMediaInventoryNowHandler(req, res) {
         scanJob.running = false;
         scanJob.finishedAt = Date.now();
         scanJob.lastError = err instanceof Error ? err.message : 'Erreur serveur';
+      } finally {
+        releaseInventoryJob(INVENTORY_JOB_DISK_SCAN);
       }
     })();
 
     return res.json({ success: true, started: true, status: scanJob });
   } catch (error) {
+    releaseInventoryJob(INVENTORY_JOB_DISK_SCAN);
     console.error('Erreur scan media inventory:', error);
     res.status(500).json({ error: error instanceof Error ? error.message : 'Erreur serveur' });
   }
 }
 
 export async function getMediaInventoryScanStatusHandler(req, res) {
-  res.json({ success: true, status: scanJob });
+  res.json({
+    success: true,
+    status: scanJob,
+    busy: getInventoryJobLock(),
+  });
 }
 
 export async function checkMediaPresenceHandler(req, res) {

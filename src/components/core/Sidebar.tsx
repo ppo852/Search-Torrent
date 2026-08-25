@@ -15,15 +15,7 @@ import { useState } from 'react';
 import packageJson from '../../../package.json';
 import { MobileBottomNav } from './MobileBottomNav';
 import { navigation, handleNavItemClick } from './navigation';
-
-function formatBytes(bytes: number, decimals = 2) {
-  if (!bytes) return '0 B';
-  const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
-}
+import { formatSpeed, formatSize } from '../../utils/formatters';
 
 export function Sidebar({
   inIframe = false,
@@ -43,10 +35,11 @@ export function Sidebar({
       const response = await fetch('/api/system/stats', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
+      if (!response.ok) throw new Error('Erreur stats système');
       return response.json();
     },
     enabled: !!token,
-    refetchInterval: 30000 // Rafraîchir toutes les 30s
+    refetchInterval: 5000
   });
 
   return (
@@ -101,7 +94,7 @@ export function Sidebar({
 
           {user?.is_admin && (
             <div className="pt-10">
-              {!collapsed && <p className="px-5 mb-4 text-[9px] font-black text-gray-600 uppercase tracking-[0.4em]">ADMINISTRATION</p>}
+              {!collapsed && <p className="px-5 mb-4 text-[9px] font-black text-gray-600 uppercase tracking-[0.4em]">PARAMÈTRES</p>}
               <NavLink
                 to="/admin"
                 className={({ isActive }) => `
@@ -132,7 +125,8 @@ export function Sidebar({
                       </div>
                       <span className="text-[8px] text-gray-500 uppercase font-black tracking-widest">Down</span>
                     </div>
-                    <span className="text-[10px] font-black text-white truncate">{formatBytes(stats.qbit.dlSpeed)}/s</span>
+                    <span className="text-[10px] font-black text-white truncate">{formatSpeed(stats.qbit.dlSpeed || 0)}</span>
+                    <span className="text-[8px] font-bold text-gray-500 truncate">{formatSize(stats.qbit.dlTotal || 0)}</span>
                   </div>
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center gap-1.5">
@@ -141,7 +135,8 @@ export function Sidebar({
                       </div>
                       <span className="text-[8px] text-gray-500 uppercase font-black tracking-widest">Up</span>
                     </div>
-                    <span className="text-[10px] font-black text-white truncate">{formatBytes(stats.qbit.upSpeed)}/s</span>
+                    <span className="text-[10px] font-black text-white truncate">{formatSpeed(stats.qbit.upSpeed || 0)}</span>
+                    <span className="text-[8px] font-bold text-gray-500 truncate">{formatSize(stats.qbit.upTotal || 0)}</span>
                   </div>
                 </div>
               )}
@@ -163,7 +158,7 @@ export function Sidebar({
                     />
                   </div>
                   <p className="text-[9px] text-gray-400 font-bold uppercase tracking-tight text-right">
-                    {formatBytes(stats.disk.free)} libres
+                    {formatSize(stats.disk.free)} libres
                   </p>
                 </div>
               )}

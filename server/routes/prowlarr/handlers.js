@@ -2,16 +2,66 @@
  * Handlers pour les recherches Prowlarr centralisées
  */
 
-import prowlarrSearchService from '../../services/prowlarr/search.js';
+import fetch from 'node-fetch';
+import prowlarrSearchService, {
+  splitQueryTitleAndYear,
+} from '../../services/prowlarr/search.js';
 import { getSetting } from '../../services/settings/index.js';
 import { getResultCompatibility } from '../../services/utils/validation.js';
 import { loadAssignedQualityProfile } from '../../services/utils/helpers.js';
 
+/**
+ * Test connexion Prowlarr (admin). Accepte url/api_key en body pour tester avant sauvegarde.
+ */
+export async function testProwlarrHandler(req, res) {
+  try {
+    const body = req.body || {};
+    let url = typeof body.url === 'string' ? body.url.trim() : '';
+    let apiKey =
+      typeof body.api_key === 'string'
+        ? body.api_key.trim()
+        : typeof body.apiKey === 'string'
+          ? body.apiKey.trim()
+          : '';
+
+    if (!url) url = String((await getSetting('prowlarr_url')) || '').trim();
+    if (!apiKey) apiKey = String((await getSetting('prowlarr_api_key')) || '').trim();
+
+    if (!url || !apiKey) {
+      return res.status(400).json({ success: false, error: 'Prowlarr non configuré' });
+    }
+
+    const base = url.replace(/\/$/, '');
+    const response = await fetch(`${base}/api/v1/system/status`, {
+      headers: { 'X-Api-Key': apiKey },
+      timeout: 8000,
+    });
+
+    if (!response.ok) {
+      return res.status(502).json({
+        success: false,
+        error: `HTTP ${response.status}`,
+      });
+    }
+
+    const data = await response.json().catch(() => ({}));
+    return res.json({
+      success: true,
+      version: data?.version || null,
+      appName: data?.appName || data?.instanceName || 'Prowlarr',
+    });
+  } catch (error) {
+    return res.status(502).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Échec de connexion Prowlarr',
+    });
+  }
+}
+
 async function withInteractiveProfileCompatibility(results, mediaType) {
   const profiles = await getSetting('quality_profiles');
   const assignments = await getSetting('quality_profile_assignments');
-  const profileMediaType = mediaType === 'movie' ? 'movie' : 'tv';
-  const profile = loadAssignedQualityProfile(profileMediaType, profiles, assignments);
+  const profile = loadAssignedQualityProfile(mediaType || 'tv', profiles, assignments);
 
   return (results || []).map((r) => ({
     ...r,
@@ -24,7 +74,7 @@ async function withInteractiveProfileCompatibility(results, mediaType) {
  */
 export async function searchMovieHandler(req, res) {
   try {
-    const { title, year, tmdbId } = req.body;
+    const { title, year, tmdbId, mediaType } = req.body;
 
     if (!title) {
       return res.status(400).json({ error: 'Titre requis' });
@@ -41,35 +91,10 @@ export async function searchMovieHandler(req, res) {
       filterByRelevance: true
     });
 
-    res.json({ results: await withInteractiveProfileCompatibility(results, 'movie') });
+    const profileType = mediaType === 'animation' ? 'animation' : 'movie';
+    res.json({ results: await withInteractiveProfileCompatibility(results, profileType) });
   } catch (error) {
     console.error('Erreur recherche film:', error);
-    res.status(500).json({ error: error.message || 'Erreur serveur' });
-  }
-}
-
-/**
- * Recherche un épisode TV
- */
-export async function searchTvEpisodeHandler(req, res) {
-  try {
-    const { title, seasonNumber, episodeNumber, mediaType, tmdbId } = req.body;
-
-    const minSeedsSetting = await getSetting('min_seeds');
-    const minSeeds = typeof minSeedsSetting === 'number' ? minSeedsSetting : 3;
-
-    const results = await prowlarrSearchService.searchTvEpisode({
-      title,
-      seasonNumber: Number(seasonNumber),
-      episodeNumber: Number(episodeNumber),
-      tmdbId: tmdbId || null,
-      mediaType: mediaType || 'tv',
-      minSeeds
-    });
-
-    res.json({ results });
-  } catch (error) {
-    console.error('Erreur recherche TV:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 }
@@ -113,11 +138,9 @@ export async function searchGeneralHandler(req, res) {
     const minSeedsSetting = await getSetting('min_seeds');
     const minSeeds = typeof minSeedsSetting === 'number' ? minSeedsSetting : 3;
 
-    // For movies, use the movie search with relevance filtering
-    if (category === 'movies') {
-      const yearMatch = query.match(/\b(19\d{2}|20\d{2})\b/);
-      const year = yearMatch?.[1] || '';
-      const title = query.replace(/\b(19\d{2}|20\d{2})\b/, '').trim();
+    // For movies / animation films, use the movie search with relevance filtering
+    if (category === 'movies' || category === 'animation') {
+      const { title, year } = splitQueryTitleAndYear(query);
 
       const results = await prowlarrSearchService.searchMovie({
         title,
@@ -127,14 +150,17 @@ export async function searchGeneralHandler(req, res) {
         filterByRelevance: true
       });
 
-      return res.json({ results });
+      return res.json({
+        results: await withInteractiveProfileCompatibility(
+          results,
+          category === 'animation' ? 'animation' : 'movie'
+        ),
+      });
     }
 
     // For TV/anime, use series search
     if (category === 'tv' || category === 'anime') {
-      const yearMatch = query.match(/\b(19\d{2}|20\d{2})\b/);
-      const year = yearMatch?.[1] || '';
-      const title = query.replace(/\b(19\d{2}|20\d{2})\b/, '').trim();
+      const { title, year } = splitQueryTitleAndYear(query);
 
       const results = await prowlarrSearchService.searchTvSeries({
         title,
@@ -143,7 +169,9 @@ export async function searchGeneralHandler(req, res) {
         minSeeds
       });
 
-      return res.json({ results });
+      return res.json({
+        results: await withInteractiveProfileCompatibility(results, category),
+      });
     }
 
     const results = await prowlarrSearchService.searchGeneral({

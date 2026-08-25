@@ -1,6 +1,6 @@
 services:
   search-torrent:
-    image: ppo852/search-torrent:1.6.4
+    image: ppo852/search-torrent:1.6.9
     container_name: search-torrent
     ports:
       - "4000:80"
@@ -9,8 +9,6 @@ services:
     environment:
       - NODE_ENV=production
       - JWT_SECRET=changez_moi_avec_une_longue_chaine_aleatoire
-      - ADMIN_USERNAME=admin
-      - ADMIN_PASSWORD=changez_moi
       - LOG_LEVEL=info
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80"]

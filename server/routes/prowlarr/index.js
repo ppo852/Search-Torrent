@@ -3,10 +3,22 @@
  */
 
 import express from 'express';
-import { authenticateToken } from '../../middleware/auth.js';
-import { searchMovieHandler, searchTvEpisodeHandler, searchTvSeriesHandler, searchGeneralHandler } from './handlers.js';
+import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
+import {
+  searchMovieHandler,
+  searchTvSeriesHandler,
+  searchGeneralHandler,
+  testProwlarrHandler,
+} from './handlers.js';
 
 const router = express.Router();
+
+/**
+ * @route POST /api/prowlarr/test
+ * @desc Teste la connexion Prowlarr (admin)
+ * @access Admin
+ */
+router.post('/test', authenticateToken, requireAdmin, testProwlarrHandler);
 
 /**
  * @route POST /api/prowlarr/search/movie
@@ -14,13 +26,6 @@ const router = express.Router();
  * @access Private
  */
 router.post('/search/movie', authenticateToken, searchMovieHandler);
-
-/**
- * @route POST /api/prowlarr/search/tv/episode
- * @desc Recherche un épisode TV spécifique
- * @access Private
- */
-router.post('/search/tv/episode', authenticateToken, searchTvEpisodeHandler);
 
 /**
  * @route POST /api/prowlarr/search/tv

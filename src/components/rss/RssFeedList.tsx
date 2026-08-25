@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react';
-import { Download, RefreshCw, Film, Tv, MonitorPlay, Clapperboard, Folder, Music, Book, ChevronRight, CalendarDays, HardDrive, Users, Rss } from 'lucide-react';
+import { useState } from 'react';
+import { Download, RefreshCw, Film, Tv, MonitorPlay, Clapperboard, Folder, Music, Book, ChevronRight, CalendarDays, HardDrive, Users, Rss, Sparkles } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
-import { formatSize, formatDate } from '../../lib/formatters';
+import { formatSize, formatDate } from '../../utils/formatters';
 import { useInteractiveTorrentDownload } from '../../hooks/useInteractiveTorrentDownload';
+import { showErrorToast } from '../../stores/toastStore';
+import { api } from '../../services/api';
 
 interface RssFeed {
   id: string;
@@ -81,19 +83,20 @@ function applyTmdbFields(item: RssItem): Pick<RssItem, 'tmdbId' | 'tmdbType' | '
   return out;
 }
 
-async function fetchFeeds(token: string): Promise<RssFeed[]> {
-  const response = await fetch('/api/rss', {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
-  });
+function resolveRssDownloadMediaType(
+  item: RssItem,
+  category?: string
+): 'movie' | 'tv' | 'anime' | 'animation' | undefined {
+  const cat = category || item.categoryName || '';
+  if (cat === 'Animation') return 'animation';
+  if (cat === 'Anime') return 'anime';
+  if (item.tmdbType === 'tv') return 'tv';
+  if (item.tmdbType === 'movie') return 'movie';
+  return undefined;
+}
 
-  if (!response.ok) {
-    throw new Error('Failed to load RSS feeds');
-  }
-
-  const feeds = await response.json();
-  return feeds;
+async function fetchFeeds(): Promise<RssFeed[]> {
+  return api.getRssFeeds();
 }
 
 interface AllRssItemsResponse {
@@ -109,20 +112,8 @@ function processRssItem(item: RssItem): RssItem {
   };
 }
 
-async function fetchAllRssItems(token: string, forceRefresh = false): Promise<Record<string, RssItem[]>> {
-  const query = forceRefresh ? '?force_refresh=true' : '';
-  const response = await fetch(`/api/rss/all-items${query}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || 'Failed to fetch RSS items');
-  }
-
-  const data: AllRssItemsResponse = await response.json();
+async function fetchAllRssItems(forceRefresh = false): Promise<Record<string, RssItem[]>> {
+  const data: AllRssItemsResponse = await api.getAllRssItems(forceRefresh);
   const itemsByFeed: Record<string, RssItem[]> = {};
 
   for (const [feedId, items] of Object.entries(data.itemsByFeed || {})) {
@@ -148,6 +139,7 @@ const TitleWithPoster = ({ poster, originalTitle, category }: TitleWithPosterPro
   const getCategoryIcon = () => {
     switch (category) {
       case 'Films': return <Film className="w-6 h-6 text-blue-400" />;
+      case 'Animation': return <Sparkles className="w-6 h-6 text-violet-400" />;
       case 'Séries TV': return <Tv className="w-6 h-6 text-purple-400" />;
       case 'Anime': return <MonitorPlay className="w-6 h-6 text-pink-400" />;
       case 'Documentaires': return <Clapperboard className="w-6 h-6 text-green-400" />;
@@ -181,24 +173,14 @@ const TitleWithPoster = ({ poster, originalTitle, category }: TitleWithPosterPro
 
 export function RssFeedList() {
   const { token, user } = useAuthStore((state) => ({ token: state.token, user: state.user }));
-  const [error, setError] = useState<string | null>(null);
-  const [showToast, setShowToast] = useState(false);
   const [selectedFeed, setSelectedFeed] = useState<string>('all');
   const queryClient = useQueryClient();
 
-  const { download, confirmModal } = useInteractiveTorrentDownload({
-    onSuccess: () => {
-      setError(null);
-      setShowToast(true);
-    },
-    onError: (msg) => setError(msg),
-  });
+  const { download, confirmModal } = useInteractiveTorrentDownload();
 
   const { data: feeds = [], isLoading: isLoadingFeeds, refetch: refetchFeeds } = useQuery({
     queryKey: ['rss-feeds', token],
-    queryFn: () => {
-      return token ? fetchFeeds(token) : Promise.resolve([]);
-    },
+    queryFn: () => fetchFeeds(),
     enabled: !!token && !!user?.id,
     staleTime: Infinity,
     gcTime: Infinity,
@@ -209,10 +191,7 @@ export function RssFeedList() {
 
   const { data: feedItems = {}, isLoading: isLoadingItems } = useQuery({
     queryKey: ['rss-items', token],
-    queryFn: async () => {
-      if (!token) return {};
-      return fetchAllRssItems(token);
-    },
+    queryFn: () => fetchAllRssItems(),
     enabled: !!token && !!user?.id,
     staleTime: Infinity,
     gcTime: Infinity,
@@ -226,12 +205,11 @@ export function RssFeedList() {
   const handleRefresh = async () => {
     try {
       if (!token) return;
-      const refreshed = await fetchAllRssItems(token, true);
+      const refreshed = await fetchAllRssItems(true);
       queryClient.setQueryData(['rss-items', token], refreshed);
       await refetchFeeds();
-      setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Erreur lors du rafraîchissement');
+      showErrorToast(e instanceof Error ? e.message : 'Erreur lors du rafraîchissement');
     }
   };
 
@@ -255,23 +233,15 @@ export function RssFeedList() {
   const handleDownload = async (item: RssItem, currentCategory?: string) => {
     if (!item.link) return;
     const categoryToUse = currentCategory || getCategory(item);
+    const tmdbId = Number(item.tmdbId);
     await download({
       url: item.link,
       name: item.title,
       itemCategory: categoryToUse,
-      mediaType: item.tmdbType,
+      mediaType: resolveRssDownloadMediaType(item, categoryToUse),
+      tmdbId: Number.isInteger(tmdbId) && tmdbId > 0 ? tmdbId : undefined,
     });
   };
-
-  useEffect(() => {
-    if (showToast) {
-      // Masquer le toast après 3 secondes
-      const timer = setTimeout(() => {
-        setShowToast(false);
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [showToast]);
 
   // Fonction pour obtenir les éléments filtrés et groupés par catégorie
   const getGroupedItems = (): GroupedItems => {
@@ -313,14 +283,15 @@ export function RssFeedList() {
   const sortCategories = (categories: string[]): string[] => {
     const categoryOrder: { [key: string]: number } = {
       'Films': 1,
-      'Séries TV': 2,
-      'Documentaires': 3, // Nouvelle position pour les documentaires
-      'Anime': 4,
-      'Musique': 5,
-      'Sport': 6,
-      'Logiciels': 7,
-      'Jeux': 8,
-      'Livres': 9,
+      'Animation': 2,
+      'Séries TV': 3,
+      'Documentaires': 4,
+      'Anime': 5,
+      'Musique': 6,
+      'Sport': 7,
+      'Logiciels': 8,
+      'Jeux': 9,
+      'Livres': 10,
       'Autres': 99
     };
     
@@ -347,16 +318,6 @@ export function RssFeedList() {
 
   return (
     <div className="space-y-6">
-      {showToast && (
-        <div className="fixed bottom-4 right-4 bg-green-500/20 text-green-400 border border-green-500/20 px-6 py-3 rounded-2xl shadow-2xl shadow-green-500/10 font-black tracking-widest uppercase text-xs animate-fade-in z-50 backdrop-blur-md">
-          Transfert initié
-        </div>
-      )}
-      {error && (
-        <div className="fixed bottom-4 left-4 bg-red-500/20 text-red-400 border border-red-500/20 px-6 py-3 rounded-2xl shadow-2xl shadow-red-500/10 font-black tracking-widest uppercase text-xs animate-fade-in z-50 backdrop-blur-md">
-          {error}
-        </div>
-      )}
       {confirmModal}
 
       {/* Barre de contrôles */}

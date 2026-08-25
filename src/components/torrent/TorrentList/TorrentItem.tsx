@@ -33,14 +33,18 @@ export const TorrentItem: React.FC<TorrentItemProps> = ({
   const ratioFormat = formatRatioWithColor(torrent.ratio || 0);
   const isPaused = ['pausedUP', 'pausedDL', 'stoppedUP', 'stoppedDL'].includes(torrent.state);
 
+  const state = torrent.state;
   const stateLabel =
-    torrent.state === 'stalledUP' ? 'En attente' :
-      torrent.state === 'uploading' ? 'Partage' :
-        torrent.state === 'downloading' ? 'Réception' :
-          torrent.state === 'pausedDL' ? 'Pause' :
-            torrent.state === 'pausedUP' ? 'Pause' :
-              torrent.state === 'error' ? 'Erreur' :
-                torrent.state;
+    state === 'stalledUP' || state === 'stalledDL' || state === 'queuedUP' || state === 'queuedDL' ? 'En attente' :
+      state === 'uploading' || state === 'forcedUP' ? 'Partage' :
+        state === 'downloading' || state === 'forcedDL' ? 'Réception' :
+          state === 'pausedDL' || state === 'pausedUP' || state === 'stoppedDL' || state === 'stoppedUP' ? 'Pause' :
+            state === 'checkingDL' || state === 'checkingUP' || state === 'checkingResumeData' ? 'Vérification' :
+              state === 'metaDL' ? 'Métadonnées' :
+                state === 'moving' ? 'Déplacement' :
+                  state === 'allocating' ? 'Allocation' :
+                    state === 'error' || state === 'missingFiles' ? 'Erreur' :
+                      state;
 
   const formatEta = (seconds?: number | null) => {
     const s = Number(seconds);
@@ -120,7 +124,7 @@ export const TorrentItem: React.FC<TorrentItemProps> = ({
                 <button onClick={() => onDelete(torrent.hash)} className="p-2.5 rounded-xl bg-red-600/5 hover:bg-red-600/10 text-red-400/60 hover:text-red-400 transition-all active:scale-95" title="Supprimer">
                   <Trash2 size={16} />
                 </button>
-                <TorrentContextMenu hash={torrent.hash} state={torrent.state} onAction={fetchTorrents} />
+                <TorrentContextMenu hash={torrent.hash} name={torrent.name} onAction={fetchTorrents} />
               </div>
             </div>
 

@@ -4,6 +4,8 @@ import { getSetting } from '../settings/index.js';
 import { getAppCache, setAppCache } from '../core/app-cache.js';
 import { fetchRSSFeedWithCache } from './index.js';
 import { getTvShowDetails } from './tmdb.js';
+import mediaInventoryService from '../media-inventory/index.js';
+import { ensureEmbySchema } from '../emby/store.js';
 
 const DEFAULT_HOURS = 72;
 const HOME_CACHE_TTL_MINUTES = 15;
@@ -58,6 +60,10 @@ function isAnimeItem(item) {
   if (item.categoryName === 'Anime') return true;
   const cat = parseInt(item.category, 10);
   return cat === 5070;
+}
+
+function isAnimationMovieItem(item) {
+  return item.categoryName === 'Animation';
 }
 
 function isSeriesTvItem(item) {
@@ -135,10 +141,16 @@ function toHomeMediaDto(item) {
 }
 
 async function getOwnedMovieTmdbIds() {
+  await mediaInventoryService.ensureSchema();
+  await ensureEmbySchema();
   const rows = await db.query(
-    `SELECT DISTINCT tmdb_id
-     FROM local_media_inventory
-     WHERE media_kind = 'movie' AND tmdb_id IS NOT NULL AND tmdb_id > 0`
+    `SELECT DISTINCT tmdb_id FROM (
+       SELECT tmdb_id FROM local_media_inventory
+       WHERE media_kind = 'movie' AND tmdb_id IS NOT NULL AND tmdb_id > 0
+       UNION
+       SELECT tmdb_id FROM emby_media_inventory
+       WHERE media_kind = 'movie' AND tmdb_id IS NOT NULL AND tmdb_id > 0
+     )`
   );
   return new Set((rows || []).map((row) => row.tmdb_id));
 }
@@ -207,7 +219,7 @@ async function filterInterestingTvItems(items, token, sharedCache = new Map()) {
  * Agrège les médias récents des trackers pour la page d'accueil.
  */
 export async function getRecentForHome({ hours = DEFAULT_HOURS } = {}) {
-  const cacheKey = `recent-home:${hours}`;
+  const cacheKey = `recent-home:v2:${hours}`;
   const cached = await getAppCache(cacheKey);
   if (cached) {
     return cached;
@@ -215,7 +227,7 @@ export async function getRecentForHome({ hours = DEFAULT_HOURS } = {}) {
 
   const allItems = await collectRssItems();
   if (!allItems.length) {
-    const empty = { films: [], series: [], anime: [], hours };
+    const empty = { films: [], animations: [], series: [], anime: [], hours };
     await setAppCache(cacheKey, empty, HOME_CACHE_TTL_MINUTES);
     return empty;
   }
@@ -223,8 +235,17 @@ export async function getRecentForHome({ hours = DEFAULT_HOURS } = {}) {
   const ownedMovieIds = await getOwnedMovieTmdbIds();
   const tmdbToken = await getSetting('tmdb_access_token');
 
+  const recentMovies = allItems.filter((item) => isRecentMovieForHome(item, hours));
+
   const films = dedupeByTmdbId(
-    allItems.filter((item) => isRecentMovieForHome(item, hours))
+    recentMovies.filter((item) => !isAnimationMovieItem(item))
+  )
+    .filter((item) => !ownedMovieIds.has(item.tmdb.tmdb_id))
+    .sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate))
+    .map(toHomeMediaDto);
+
+  const animations = dedupeByTmdbId(
+    recentMovies.filter((item) => isAnimationMovieItem(item))
   )
     .filter((item) => !ownedMovieIds.has(item.tmdb.tmdb_id))
     .sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate))
@@ -257,13 +278,7 @@ export async function getRecentForHome({ hours = DEFAULT_HOURS } = {}) {
       .map(toHomeMediaDto);
   }
 
-  const result = { films, series, anime, hours };
+  const result = { films, animations, series, anime, hours };
   await setAppCache(cacheKey, result, HOME_CACHE_TTL_MINUTES);
   return result;
-}
-
-/** @deprecated Alias films-only */
-export async function getRecentMoviesForHome(options) {
-  const result = await getRecentForHome(options);
-  return { films: result.films, hours: result.hours };
 }

@@ -46,6 +46,13 @@ dist-ssr
 
 # Development files
 TASKS.md
-docker-compose.dev.yml
 .gemini/
 data/
+
+# Stack locale de test (Prowlarr / qBit / Emby / data app)
+test-application/
+
+# Docker Compose personnels (ne garder que docker-compose.yml à la racine)
+# Exemples versionnés : docker-compose.dev.yml.example, docker-compose.stack.yml.example
+docker-compose.*.yml
+docker-compose.override.yml

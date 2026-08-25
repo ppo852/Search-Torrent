@@ -1,11 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { Trash2, Settings, Users, Rss, SlidersHorizontal, HardDrive, Activity, Shield, Cpu, Key, Database, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Trash2, Settings, Users, Rss, SlidersHorizontal, HardDrive, Activity, Shield, Cpu, Key, Database, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { getActivityEventLabel, formatActivityDetails } from '../lib/activity-log-labels';
 import { useAuthStore } from '../stores/authStore';
-import { api } from '../lib/api';
+import { api } from '../services/api';
 import { UserSettingsModal } from '../components/settings/UserSettingsModal';
+import { AdminEmbyConnectionPanel, AdminEmbyInventoryPanel } from '../components/settings/AdminEmbyPanel';
 import { AdminRssFeedManager } from '../components/rss/AdminRssFeedManager';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { globalSettings } from '../services/settings';
+import { showErrorToast, showInfoToast, showToast } from '../stores/toastStore';
 
 interface User {
   id: string;
@@ -13,11 +16,11 @@ interface User {
   is_admin: boolean;
   created_at: string;
   qbit_url?: string;
-  qbit_username?: string;
-  qbit_password?: string;
+  has_qbit_api_key?: boolean;
   download_path_movies?: string;
   download_path_series?: string;
   download_path_anime?: string;
+  download_path_animation?: string;
   allow_force_interactive_download?: boolean;
 }
 
@@ -35,12 +38,46 @@ export interface QualityProfile {
 
 export interface QualityProfileAssignments {
   movie_profile_id: string;
+  animation_profile_id: string;
   tv_profile_id: string;
+  anime_profile_id: string;
+}
+
+function ProfileAssignSelect({
+  label,
+  value,
+  profiles,
+  emptyLabel = 'Aucun profil',
+  onChange,
+}: {
+  label: string;
+  value: string;
+  profiles: QualityProfile[];
+  emptyLabel?: string;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">
+        {label}
+      </label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white text-[11px] font-black uppercase tracking-widest outline-none appearance-none cursor-pointer"
+      >
+        <option value="" className="bg-gray-900">{emptyLabel}</option>
+        {profiles.map((p) => (
+          <option key={p.id} value={p.id} className="bg-gray-900">{p.name}</option>
+        ))}
+      </select>
+    </div>
+  );
 }
 
 export function AdminPage() {
   const currentUser = useAuthStore((state) => state.user);
-  const [activeTab, setActiveTab] = useState('users');
+  const [activeTab, setActiveTab] = useState('system');
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -57,17 +94,25 @@ export function AdminPage() {
   const [autoSearchIntervalInput, setAutoSearchIntervalInput] = useState<string>('60');
   const [mediaScanIntervalInput, setMediaScanIntervalInput] = useState<string>('30');
   const [autoDeleteCompletedHoursInput, setAutoDeleteCompletedHoursInput] = useState<string>('24');
+  const [embySyncIntervalInput, setEmbySyncIntervalInput] = useState<string>('60');
+  const [isTestingProwlarr, setIsTestingProwlarr] = useState(false);
+  const [isTestingTmdb, setIsTestingTmdb] = useState(false);
+  const [isSavingProwlarr, setIsSavingProwlarr] = useState(false);
+  const [isSavingTmdb, setIsSavingTmdb] = useState(false);
+  const [isSavingAutomation, setIsSavingAutomation] = useState(false);
+  const [prowlarrLabel, setProwlarrLabel] = useState<string | null>(null);
+  const [tmdbLabel, setTmdbLabel] = useState<string | null>(null);
   const [qualityProfiles, setQualityProfiles] = useState<QualityProfile[]>([]);
   const [qualityAssignments, setQualityAssignments] = useState<QualityProfileAssignments>({
     movie_profile_id: '',
-    tv_profile_id: ''
+    animation_profile_id: '',
+    tv_profile_id: '',
+    anime_profile_id: ''
   });
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
   const [newProfileName, setNewProfileName] = useState<string>('');
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [mediaInventoryScanStatus, setMediaInventoryScanStatus] = useState<any>(null);
-  const [isPollingMediaInventoryScan, setIsPollingMediaInventoryScan] = useState(false);
+  const [activeScanMode, setActiveScanMode] = useState<'quick' | 'full' | null>(null);
   const [confirmConfig, setConfirmConfig] = useState<{
     isOpen: boolean;
     title: string;
@@ -79,21 +124,36 @@ export function AdminPage() {
     message: '',
     onConfirm: () => { }
   });
+  const [systemHealth, setSystemHealth] = useState<any>(null);
+  const [isHealthLoading, setIsHealthLoading] = useState(false);
+  const [isBackupLoading, setIsBackupLoading] = useState(false);
+  const [activityItems, setActivityItems] = useState<any[]>([]);
+  const [isActivityLoading, setIsActivityLoading] = useState(false);
+  const wasScanRunning = useRef(false);
 
   useEffect(() => { if (currentUser && !currentUser.is_admin) window.location.href = '/'; }, [currentUser]);
   useEffect(() => { loadInitialData(); }, []);
 
   useEffect(() => {
-    if (activeTab !== 'settings') return;
+    if (activeTab !== 'inventory') return;
     let interval: number | undefined;
     let cancelled = false;
     const refresh = async () => {
       try {
         const data = await api.getMediaInventoryScanStatus();
         if (cancelled) return;
-        setMediaInventoryScanStatus(data?.status ?? null);
-        const running = Boolean(data?.status?.running);
-        setIsPollingMediaInventoryScan(running);
+        const status = data?.status ?? null;
+        setMediaInventoryScanStatus(status);
+        const running = Boolean(status?.running);
+        if (wasScanRunning.current && !running) {
+          if (status?.lastError) {
+            showErrorToast(`Scan terminé avec erreur : ${status.lastError}`);
+          } else {
+            showToast('Scan terminé');
+          }
+        }
+        wasScanRunning.current = running;
+        if (!running) setActiveScanMode(null);
         if (!running && interval != null) { window.clearInterval(interval); interval = undefined; }
       } catch { }
     };
@@ -112,6 +172,7 @@ export function AdminPage() {
         const intervalValue = (settings as any).auto_search_interval_minutes ?? 60;
         const mediaIntervalValue = (settings as any).media_scan_interval_minutes ?? 30;
         const autoDeleteHoursValue = (settings as any).media_requests_auto_delete_completed_after_hours ?? 24;
+        const embySyncIntervalValue = (settings as any).emby_sync_interval_minutes ?? 60;
         setGlobalConfig({
           prowlarr_url: settings.prowlarr_url || '',
           prowlarr_api_key: settings.prowlarr_api_key || '',
@@ -124,6 +185,7 @@ export function AdminPage() {
         setAutoSearchIntervalInput(String(intervalValue));
         setMediaScanIntervalInput(String(mediaIntervalValue));
         setAutoDeleteCompletedHoursInput(String(autoDeleteHoursValue));
+        setEmbySyncIntervalInput(String(embySyncIntervalValue));
         const profilesRaw = Array.isArray((settings as any).quality_profiles) ? (settings as any).quality_profiles : [];
         const assignments = (settings as any).quality_profile_assignments || null;
         if (Array.isArray(profilesRaw)) {
@@ -139,75 +201,211 @@ export function AdminPage() {
           setQualityProfiles(normalized);
           if (normalized.length > 0 && !selectedProfileId) setSelectedProfileId(normalized[0].id);
         }
-        if (assignments) setQualityAssignments({ movie_profile_id: assignments.movie_profile_id || '', tv_profile_id: assignments.tv_profile_id || '' });
+        if (assignments) {
+          setQualityAssignments({
+            movie_profile_id: assignments.movie_profile_id || '',
+            animation_profile_id: assignments.animation_profile_id || assignments.movie_profile_id || '',
+            tv_profile_id: assignments.tv_profile_id || '',
+            anime_profile_id: assignments.anime_profile_id || assignments.tv_profile_id || '',
+          });
+        }
       }
-    } catch { setError('Sync error'); }
+    } catch { showErrorToast('Sync error'); }
     finally { if (!options?.silent) setIsLoading(false); }
   };
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    try { await api.createUser(newUser.username, newUser.password, newUser.is_admin); setSuccess('Identité créée'); setNewUser({ username: '', password: '', is_admin: false }); loadInitialData(); }
-    catch { setError('Échec de création'); }
+    try { await api.createUser(newUser.username, newUser.password, newUser.is_admin); showToast('Identité créée'); setNewUser({ username: '', password: '', is_admin: false }); loadInitialData(); }
+    catch { showErrorToast('Échec de création'); }
   };
 
-  const handleSaveSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveProwlarr = async () => {
     try {
-      await globalSettings.save({
-        ...globalConfig,
+      setIsSavingProwlarr(true);
+      await api.updateSettings({
+        prowlarr_url: globalConfig.prowlarr_url,
+        prowlarr_api_key: globalConfig.prowlarr_api_key,
+        min_seeds: globalConfig.min_seeds,
+      });
+      showToast('Prowlarr sauvegardé');
+    } catch {
+      showErrorToast('Échec de sauvegarde Prowlarr');
+    } finally {
+      setIsSavingProwlarr(false);
+    }
+  };
+
+  const handleSaveTmdb = async () => {
+    try {
+      setIsSavingTmdb(true);
+      await api.updateSettings({
+        tmdb_access_token: globalConfig.tmdb_access_token,
+      });
+      showToast('TMDB sauvegardé');
+    } catch {
+      showErrorToast('Échec de sauvegarde TMDB');
+    } finally {
+      setIsSavingTmdb(false);
+    }
+  };
+
+  const handleSaveAutomation = async () => {
+    try {
+      setIsSavingAutomation(true);
+      const autoDeleteHours = parseInt(autoDeleteCompletedHoursInput, 10);
+      const embySync = parseInt(embySyncIntervalInput, 10);
+      if (!Number.isFinite(embySync) || embySync < 5) {
+        showErrorToast('L\'intervalle Emby doit être d\'au moins 5 minutes');
+        return;
+      }
+      await api.updateSettings({
         auto_search_interval_minutes: parseInt(autoSearchIntervalInput) || 60,
         media_scan_interval_minutes: parseInt(mediaScanIntervalInput) || 30,
-        media_requests_auto_delete_completed_after_hours: parseInt(autoDeleteCompletedHoursInput) || 24
+        media_requests_auto_delete_completed_after_hours:
+          Number.isFinite(autoDeleteHours) && autoDeleteHours >= 0 ? autoDeleteHours : 24,
+        emby_sync_interval_minutes: embySync,
       });
-      setSuccess('Noyau système mis à jour');
-    } catch { setError('Échec de sauvegarde'); }
+      showToast('Inventaire & planification sauvegardés');
+    } catch {
+      showErrorToast('Échec de sauvegarde');
+    } finally {
+      setIsSavingAutomation(false);
+    }
   };
 
-  const isProfileAssigned = (id: string) => qualityAssignments.movie_profile_id === id || qualityAssignments.tv_profile_id === id;
+  const handleTestProwlarr = async () => {
+    try {
+      setIsTestingProwlarr(true);
+      setProwlarrLabel(null);
+      const result = await api.testProwlarrConnection({
+        url: globalConfig.prowlarr_url,
+        api_key: globalConfig.prowlarr_api_key,
+      });
+      const label = [result.appName, result.version].filter(Boolean).join(' · ');
+      setProwlarrLabel(label || 'Connexion OK');
+      showToast('Connexion Prowlarr réussie');
+    } catch (err: any) {
+      setProwlarrLabel(null);
+      showErrorToast(err?.message || 'Échec de connexion Prowlarr');
+    } finally {
+      setIsTestingProwlarr(false);
+    }
+  };
+
+  const handleTestTmdb = async () => {
+    try {
+      setIsTestingTmdb(true);
+      setTmdbLabel(null);
+      await api.testTmdbConnection({
+        access_token: globalConfig.tmdb_access_token,
+      });
+      setTmdbLabel('Connexion OK');
+      showToast('Connexion TMDB réussie');
+    } catch (err: any) {
+      setTmdbLabel(null);
+      showErrorToast(err?.message || 'Échec de connexion TMDB');
+    } finally {
+      setIsTestingTmdb(false);
+    }
+  };
+
+  const launchMediaInventoryScan = async (options?: { force?: boolean }) => {
+    const mode = options?.force ? 'full' : 'quick';
+    try {
+      await api.scanMediaInventoryNow(options);
+      wasScanRunning.current = true;
+      setActiveScanMode(mode);
+      showInfoToast(mode === 'full' ? 'Scan complet lancé…' : 'Scan rapide lancé…');
+    } catch (err: any) {
+      showErrorToast(err?.message || 'Impossible de lancer le scan');
+    }
+  };
+
+  const refreshSystemHealth = async () => {
+    try {
+      setIsHealthLoading(true);
+      const data = await api.getSystemHealth();
+      setSystemHealth(data);
+    } catch {
+      showErrorToast('Impossible de tester les services');
+    } finally {
+      setIsHealthLoading(false);
+    }
+  };
+
+  const handleDownloadBackup = async () => {
+    try {
+      setIsBackupLoading(true);
+      await api.downloadDatabaseBackup();
+      showToast('Sauvegarde téléchargée');
+    } catch {
+      showErrorToast('Échec du téléchargement de la base');
+    } finally {
+      setIsBackupLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'system') {
+      refreshSystemHealth();
+    }
+    if (activeTab === 'history') {
+      loadActivityLog();
+    }
+  }, [activeTab]);
+
+  const loadActivityLog = async () => {
+    try {
+      setIsActivityLoading(true);
+      const data = await api.getAdminActivity(150);
+      setActivityItems(data.items || []);
+    } catch {
+      showErrorToast('Impossible de charger l\'historique');
+    } finally {
+      setIsActivityLoading(false);
+    }
+  };
+
+  const isProfileAssigned = (id: string) =>
+    qualityAssignments.movie_profile_id === id ||
+    qualityAssignments.animation_profile_id === id ||
+    qualityAssignments.tv_profile_id === id ||
+    qualityAssignments.anime_profile_id === id;
 
   if (isLoading) return <div className="flex items-center justify-center py-32"><div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" /></div>;
   if (!currentUser?.is_admin) return null;
 
   return (
     <div className="animate-premium-fade space-y-12 pb-20">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-8 border-b border-white/5 pb-8">
-        <div>
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-1.5 h-8 bg-blue-600 rounded-full shadow-[0_0_15px_rgba(37,99,235,0.5)]" />
-            <h1 className="text-2xl lg:text-3xl font-black text-white tracking-tighter uppercase leading-none">Administration</h1>
-          </div>
-          <p className="text-gray-500 font-bold uppercase text-[10px] tracking-[0.3em] ml-4">Terminal de contrôle central • V1.2.0</p>
-        </div>
-
-        <div className="grid grid-cols-2 md:flex flex-wrap gap-2 p-1.5 bg-white/5 border border-white/10 rounded-2xl shadow-2xl backdrop-blur-xl">
+      <div className="flex justify-end border-b border-white/5 pb-8">
+        <div className="flex overflow-x-auto pb-2 -mx-1 px-1 md:overflow-visible md:pb-0 w-full md:w-auto">
+          <div className="flex md:flex-wrap gap-2 p-1.5 bg-white/5 border border-white/10 rounded-2xl shadow-2xl backdrop-blur-xl min-w-max">
           {[
-            { id: 'users', label: 'UTILISATEURS', icon: Users, color: 'blue' },
-            { id: 'settings', label: 'CONFIGURATION', icon: Cpu, color: 'violet' },
-            { id: 'quality', label: 'QUALITÉ', icon: SlidersHorizontal, color: 'blue' },
-            { id: 'rss', label: 'RÉSEAUX RSS', icon: Rss, color: 'orange' }
+            { id: 'system', label: 'SYSTÈME', icon: Database, activeClass: 'bg-green-600 text-white shadow-xl shadow-green-600/30' },
+            { id: 'integrations', label: 'INTÉGRATIONS', icon: Cpu, activeClass: 'bg-violet-600 text-white shadow-xl shadow-violet-600/30' },
+            { id: 'inventory', label: 'INVENTAIRE', icon: HardDrive, activeClass: 'bg-amber-600 text-white shadow-xl shadow-amber-600/30' },
+            { id: 'quality', label: 'QUALITÉ', icon: SlidersHorizontal, activeClass: 'bg-blue-600 text-white shadow-xl shadow-blue-600/30' },
+            { id: 'rss', label: 'FLUX RSS', icon: Rss, activeClass: 'bg-orange-600 text-white shadow-xl shadow-orange-600/30' },
+            { id: 'users', label: 'UTILISATEURS', icon: Users, activeClass: 'bg-blue-600 text-white shadow-xl shadow-blue-600/30' },
+            { id: 'history', label: 'HISTORIQUE', icon: Shield, activeClass: 'bg-violet-600 text-white shadow-xl shadow-violet-600/30' }
           ].map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-5 py-2.5 rounded-xl flex items-center gap-3 transition-all duration-500 font-black text-[10px] tracking-widest ${activeTab === tab.id
-                  ? `bg-${tab.color}-600 text-white shadow-xl shadow-${tab.color}-600/30`
+              className={`px-4 sm:px-5 py-2.5 rounded-xl flex items-center gap-2 sm:gap-3 transition-all duration-500 font-black text-[10px] tracking-widest whitespace-nowrap ${activeTab === tab.id
+                  ? tab.activeClass
                   : 'text-gray-500 hover:text-white hover:bg-white/5'
                 }`}
             >
               <tab.icon size={16} />
-              <span>{tab.label}</span>
+              <span className="hidden sm:inline">{tab.label}</span>
+              <span className="sm:hidden">{tab.label.split(' ')[0]}</span>
             </button>
           ))}
+          </div>
         </div>
       </div>
-
-      {(error || success) && (
-        <div className={`p-4 rounded-2xl border flex items-center gap-4 animate-premium-fade ${error ? 'bg-red-600/10 border-red-600/20 text-red-400' : 'bg-green-600/10 border-green-600/20 text-green-400'}`}>
-          <Shield size={20} />
-          <span className="text-[11px] font-black uppercase tracking-widest">{error || success}</span>
-        </div>
-      )}
 
       {activeTab === 'users' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
@@ -274,84 +472,189 @@ export function AdminPage() {
         </div>
       )}
 
-      {activeTab === 'settings' && (
-        <form onSubmit={handleSaveSettings} className="grid grid-cols-1 md:grid-cols-2 gap-12">
-          <div className="glass-card p-8 space-y-8 border-white/5">
-            <h3 className="text-xl font-black text-white flex items-center gap-4 uppercase tracking-tighter">
-              <div className="w-10 h-10 rounded-2xl bg-blue-600/10 text-blue-500 flex items-center justify-center font-black">P</div>
-              Indexation Prowlarr
-            </h3>
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <label className="block text-[10px] font-black text-gray-600 uppercase tracking-widest ml-1">URL Service</label>
-                <input type="url" value={globalConfig.prowlarr_url} onChange={(e) => setGlobalConfig({ ...globalConfig, prowlarr_url: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white text-xs font-black tracking-widest focus:ring-2 focus:ring-blue-500/40 transition-all" placeholder="http://prowlarr:9696" />
+      {activeTab === 'integrations' && (
+        <div className="space-y-12">
+          <div className="flex items-center gap-4 border-b border-white/5 pb-4">
+            <Cpu className="text-violet-500" size={24} />
+            <h2 className="text-xl font-black text-white uppercase tracking-tighter">Connexions externes</h2>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+            <div className="glass-card p-8 space-y-8 border-white/5">
+              <h3 className="text-xl font-black text-white flex items-center gap-4 uppercase tracking-tighter">
+                <div className="w-10 h-10 rounded-2xl bg-blue-600/10 text-blue-500 flex items-center justify-center font-black">P</div>
+                Indexation Prowlarr
+              </h3>
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-black text-gray-600 uppercase tracking-widest ml-1">URL Service</label>
+                  <input type="url" value={globalConfig.prowlarr_url} onChange={(e) => setGlobalConfig({ ...globalConfig, prowlarr_url: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white text-xs font-black tracking-widest focus:ring-2 focus:ring-blue-500/40 transition-all" placeholder="http://prowlarr:9696" />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-black text-gray-600 uppercase tracking-widest ml-1">Clé de Sécurité</label>
+                  <input type="password" value={globalConfig.prowlarr_api_key} onChange={(e) => setGlobalConfig({ ...globalConfig, prowlarr_api_key: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white focus:ring-2 focus:ring-blue-500/40 transition-all" />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-black text-gray-600 uppercase tracking-widest ml-1">Seuil Seeds Minimal</label>
+                  <input type="number" value={globalConfig.min_seeds} onChange={(e) => setGlobalConfig({ ...globalConfig, min_seeds: parseInt(e.target.value) || 0 })} className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white font-black focus:ring-2 focus:ring-blue-500/40 transition-all" />
+                </div>
+                {prowlarrLabel && (
+                  <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest flex items-center gap-2">
+                    <CheckCircle2 size={14} /> {prowlarrLabel}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleTestProwlarr}
+                    disabled={isTestingProwlarr || !globalConfig.prowlarr_url.trim() || !globalConfig.prowlarr_api_key.trim()}
+                    className="px-5 py-3 bg-white/5 border border-white/10 text-gray-300 hover:bg-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-40 flex items-center gap-2"
+                  >
+                    <RefreshCw size={14} className={isTestingProwlarr ? 'animate-spin' : ''} />
+                    Tester
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveProwlarr}
+                    disabled={isSavingProwlarr}
+                    className="px-5 py-3 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-500 transition-all disabled:opacity-50"
+                  >
+                    {isSavingProwlarr ? 'Sauvegarde…' : 'Sauvegarder'}
+                  </button>
+                </div>
               </div>
-              <div className="space-y-2">
-                <label className="block text-[10px] font-black text-gray-600 uppercase tracking-widest ml-1">Clé de Sécurité</label>
-                <input type="password" value={globalConfig.prowlarr_api_key} onChange={(e) => setGlobalConfig({ ...globalConfig, prowlarr_api_key: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white focus:ring-2 focus:ring-blue-500/40 transition-all" />
-              </div>
-              <div className="space-y-2">
-                <label className="block text-[10px] font-black text-gray-600 uppercase tracking-widest ml-1">Seuil Seeds Minimal</label>
-                <input type="number" value={globalConfig.min_seeds} onChange={(e) => setGlobalConfig({ ...globalConfig, min_seeds: parseInt(e.target.value) || 0 })} className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white font-black focus:ring-2 focus:ring-blue-500/40 transition-all" />
+            </div>
+
+            <div className="glass-card p-8 space-y-8 border-white/5">
+              <h3 className="text-xl font-black text-white flex items-center gap-4 uppercase tracking-tighter">
+                <Database className="text-green-500" size={24} /> Métadonnées TMDB
+              </h3>
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-black text-gray-600 uppercase tracking-widest ml-1">Token Authentification (v4)</label>
+                  <input type="password" value={globalConfig.tmdb_access_token} onChange={(e) => setGlobalConfig({ ...globalConfig, tmdb_access_token: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white focus:ring-2 focus:ring-green-500/40 transition-all" />
+                </div>
+                {tmdbLabel && (
+                  <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest flex items-center gap-2">
+                    <CheckCircle2 size={14} /> {tmdbLabel}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleTestTmdb}
+                    disabled={isTestingTmdb || !globalConfig.tmdb_access_token.trim()}
+                    className="px-5 py-3 bg-white/5 border border-white/10 text-gray-300 hover:bg-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-40 flex items-center gap-2"
+                  >
+                    <RefreshCw size={14} className={isTestingTmdb ? 'animate-spin' : ''} />
+                    Tester
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveTmdb}
+                    disabled={isSavingTmdb}
+                    className="px-5 py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-500 transition-all disabled:opacity-50"
+                  >
+                    {isSavingTmdb ? 'Sauvegarde…' : 'Sauvegarder'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="glass-card p-8 space-y-8 border-white/5">
-            <h3 className="text-xl font-black text-white flex items-center gap-4 uppercase tracking-tighter">
-              <Database className="text-green-500" size={24} /> Métadonnées TMDB
-            </h3>
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <label className="block text-[10px] font-black text-gray-600 uppercase tracking-widest ml-1">Token Authentification (v4)</label>
-                <input type="password" value={globalConfig.tmdb_access_token} onChange={(e) => setGlobalConfig({ ...globalConfig, tmdb_access_token: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white focus:ring-2 focus:ring-green-500/40 transition-all" />
-              </div>
-              <div className="space-y-2">
-                <label className="block text-[10px] font-black text-gray-600 uppercase tracking-widest ml-1">Intervalle de Scan (MIN)</label>
-                <input type="number" value={autoSearchIntervalInput} onChange={(e) => setAutoSearchIntervalInput(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white font-black focus:ring-2 focus:ring-green-500/40 transition-all" />
-              </div>
-            </div>
+          <AdminEmbyConnectionPanel />
+        </div>
+      )}
+
+      {activeTab === 'inventory' && (
+        <div className="space-y-10">
+          <div className="flex items-center gap-4 border-b border-white/5 pb-4">
+            <HardDrive className="text-amber-500" size={24} />
+            <h2 className="text-xl font-black text-white uppercase tracking-tighter">Inventaire & planification</h2>
           </div>
 
-          <div className="glass-card p-8 space-y-8 border-white/5">
-            <h3 className="text-xl font-black text-white flex items-center gap-4 uppercase tracking-tighter">
-              <HardDrive size={24} className="text-amber-400" /> Planification Scan
-            </h3>
-            <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="glass-card p-8 space-y-6 border-white/5">
+              <div>
+                <h3 className="text-xl font-black text-white flex items-center gap-4 uppercase tracking-tighter">
+                  <Activity className="text-violet-400" size={24} /> Recherche auto des demandes
+                </h3>
+                <p className="text-[11px] text-gray-500 mt-2 font-medium normal-case tracking-normal">
+                  Relance Prowlarr pour les films et saisons encore en attente dans la bibliothèque.
+                </p>
+              </div>
               <div className="space-y-2">
-                <label className="block text-[10px] font-black text-gray-600 uppercase tracking-widest ml-1">Frequence Indexation Globale (min)</label>
+                <label className="block text-[10px] font-black text-gray-600 uppercase tracking-widest ml-1">Intervalle (minutes)</label>
+                <input type="number" value={autoSearchIntervalInput} onChange={(e) => setAutoSearchIntervalInput(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white font-black focus:ring-2 focus:ring-violet-500/40 transition-all" />
+              </div>
+            </div>
+
+            <div className="glass-card p-8 space-y-6 border-white/5">
+              <div>
+                <h3 className="text-xl font-black text-white flex items-center gap-4 uppercase tracking-tighter">
+                  <HardDrive size={24} className="text-amber-400" /> Indexation du disque
+                </h3>
+                <p className="text-[11px] text-gray-500 mt-2 font-medium normal-case tracking-normal">
+                  Parcourt les dossiers de téléchargement pour détecter les fichiers déjà présents (films, animations, séries, animes).
+                </p>
+              </div>
+              <div className="space-y-2">
+                <label className="block text-[10px] font-black text-gray-600 uppercase tracking-widest ml-1">Intervalle (minutes)</label>
                 <input type="number" value={mediaScanIntervalInput} onChange={(e) => setMediaScanIntervalInput(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white font-black focus:ring-2 focus:ring-amber-500/40 transition-all" />
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <button type="button" onClick={() => api.scanMediaInventoryNow()} className="w-full py-4 bg-amber-600/10 text-amber-500 font-black uppercase text-[10px] tracking-widest rounded-2xl border border-amber-500/20 hover:bg-amber-600/20 transition-all flex items-center justify-center gap-3">
-                  <Activity size={18} className={isPollingMediaInventoryScan ? 'animate-spin' : ''} /> Lancer un Scan Rapide
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button type="button" onClick={() => launchMediaInventoryScan()} className="w-full py-3 bg-amber-600/10 text-amber-500 font-black uppercase text-[10px] tracking-widest rounded-2xl border border-amber-500/20 hover:bg-amber-600/20 transition-all flex items-center justify-center gap-2">
+                  <Activity size={16} className={activeScanMode === 'quick' ? 'animate-spin' : ''} /> Scan rapide
                 </button>
-                <button type="button" onClick={async () => {
-                  if (window.confirm("Voulez-vous forcer un scan complet ? Cela va vider la table d'indexation locale et tout reconstruire à partir du disque.")) {
-                    await api.scanMediaInventoryNow({ force: true });
-                  }
-                }} className="w-full py-4 bg-red-600/10 text-red-500 font-black uppercase text-[10px] tracking-widest rounded-2xl border border-red-500/20 hover:bg-red-600/20 transition-all flex items-center justify-center gap-3">
-                  <RefreshCw size={18} className={isPollingMediaInventoryScan ? 'animate-spin' : ''} /> Lancer un Scan Complet
+                <button type="button" onClick={() => {
+                  setConfirmConfig({
+                    isOpen: true,
+                    title: 'Forcer un scan complet ?',
+                    message: "La table d'indexation locale sera vidée puis reconstruite à partir du disque.",
+                    onConfirm: () => { launchMediaInventoryScan({ force: true }); }
+                  });
+                }} className="w-full py-3 bg-red-600/10 text-red-500 font-black uppercase text-[10px] tracking-widest rounded-2xl border border-red-500/20 hover:bg-red-600/20 transition-all flex items-center justify-center gap-2">
+                  <RefreshCw size={16} className={activeScanMode === 'full' ? 'animate-spin' : ''} /> Scan complet
                 </button>
               </div>
             </div>
           </div>
 
-          <div className="glass-card p-8 space-y-8 border-white/5">
-            <h3 className="text-xl font-black text-white flex items-center gap-4 uppercase tracking-tighter">
-              <Trash2 size={24} className="text-red-500" /> Purge & Cleanup
-            </h3>
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <label className="block text-[10px] font-black text-gray-600 uppercase tracking-widest ml-1">Auto-Delete Finished (H)</label>
-                <input type="number" value={autoDeleteCompletedHoursInput} onChange={(e) => setAutoDeleteCompletedHoursInput(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white font-black focus:ring-2 focus:ring-red-500/40 transition-all" />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <AdminEmbyInventoryPanel
+              onGoToIntegrations={() => setActiveTab('integrations')}
+              syncInterval={embySyncIntervalInput}
+              onSyncIntervalChange={setEmbySyncIntervalInput}
+            />
+
+            <div className="glass-card p-8 space-y-6 border-white/5">
+              <div>
+                <h3 className="text-xl font-black text-white flex items-center gap-4 uppercase tracking-tighter">
+                  <Trash2 size={24} className="text-red-500" /> Nettoyage de la bibliothèque
+                </h3>
+                <p className="text-[11px] text-gray-500 mt-2 font-medium normal-case tracking-normal">
+                  Supprime les demandes marquées terminées après un délai. Ne supprime pas les fichiers sur le disque.
+                  Mettre <strong className="text-gray-400">0</strong> pour purger dès le prochain scan disque.
+                </p>
               </div>
-              <div className="pt-8">
-                <button type="submit" className="w-full py-5 bg-blue-600 text-white font-black uppercase text-sm tracking-[0.3em] rounded-2xl shadow-2xl shadow-blue-600/40 hover:bg-blue-500 hover:scale-[1.02] active:scale-[0.98] transition-all">Synchroniser le Noyau</button>
+              <div className="space-y-2">
+                <label className="block text-[10px] font-black text-gray-600 uppercase tracking-widest ml-1">Délai après fin de demande (heures)</label>
+                <input type="number" min={0} value={autoDeleteCompletedHoursInput} onChange={(e) => setAutoDeleteCompletedHoursInput(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white font-black focus:ring-2 focus:ring-red-500/40 transition-all" />
               </div>
             </div>
           </div>
-        </form>
+
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={handleSaveAutomation}
+              disabled={isSavingAutomation}
+              className="px-8 py-4 bg-violet-600 text-white font-black uppercase text-[10px] tracking-widest rounded-2xl shadow-xl shadow-violet-600/30 hover:bg-violet-500 transition-all disabled:opacity-50"
+            >
+              {isSavingAutomation ? 'Sauvegarde…' : 'Tout sauvegarder'}
+            </button>
+          </div>
+        </div>
       )}
 
       {activeTab === 'quality' && (
@@ -390,7 +693,7 @@ export function AdminPage() {
               <div className="glass-card p-10 space-y-12 animate-premium-fade">
                 <div className="flex items-center justify-between border-b border-white/5 pb-8">
                   <h3 className="text-xl lg:text-2xl font-black text-white tracking-tighter uppercase">{qualityProfiles.find(p => p.id === selectedProfileId)?.name}</h3>
-                  <button onClick={async () => { try { await api.updateSettings({ quality_profiles: qualityProfiles, quality_profile_assignments: qualityAssignments }); setSuccess('Profils Qualité Synchronisés'); } catch { setError('Sync Error'); } }} className="px-8 py-3 bg-blue-600 text-white font-black uppercase text-[10px] tracking-widest rounded-2xl shadow-xl shadow-blue-600/40 hover:bg-blue-500 transition-all">Sauvegarder</button>
+                  <button onClick={async () => { try { await api.updateSettings({ quality_profiles: qualityProfiles, quality_profile_assignments: qualityAssignments }); showToast('Profils Qualité Synchronisés'); } catch { showErrorToast('Sync Error'); } }} className="px-8 py-3 bg-blue-600 text-white font-black uppercase text-[10px] tracking-widest rounded-2xl shadow-xl shadow-blue-600/40 hover:bg-blue-500 transition-all">Sauvegarder</button>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
@@ -459,28 +762,32 @@ export function AdminPage() {
                       <Settings className="text-blue-500" size={20} /> Assignation des Profils
                    </h3>
                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
-                      <div className="space-y-4">
-                        <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Profil par défaut : FILMS</label>
-                        <select 
-                          value={qualityAssignments.movie_profile_id} 
-                          onChange={(e) => setQualityAssignments({ ...qualityAssignments, movie_profile_id: e.target.value })}
-                          className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white text-[11px] font-black uppercase tracking-widest outline-none appearance-none cursor-pointer"
-                        >
-                          <option value="" className="bg-gray-900">Aucun profil</option>
-                          {qualityProfiles.map(p => <option key={p.id} value={p.id} className="bg-gray-900">{p.name}</option>)}
-                        </select>
-                      </div>
-                      <div className="space-y-4">
-                        <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Profil par défaut : SÉRIES / ANIME</label>
-                        <select 
-                          value={qualityAssignments.tv_profile_id} 
-                          onChange={(e) => setQualityAssignments({ ...qualityAssignments, tv_profile_id: e.target.value })}
-                          className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white text-[11px] font-black uppercase tracking-widest outline-none appearance-none cursor-pointer"
-                        >
-                          <option value="" className="bg-gray-900">Aucun profil</option>
-                          {qualityProfiles.map(p => <option key={p.id} value={p.id} className="bg-gray-900">{p.name}</option>)}
-                        </select>
-                      </div>
+                      <ProfileAssignSelect
+                        label="Profil par défaut : FILMS"
+                        value={qualityAssignments.movie_profile_id}
+                        profiles={qualityProfiles}
+                        onChange={(id) => setQualityAssignments({ ...qualityAssignments, movie_profile_id: id })}
+                      />
+                      <ProfileAssignSelect
+                        label="Profil par défaut : ANIMATION"
+                        value={qualityAssignments.animation_profile_id}
+                        profiles={qualityProfiles}
+                        emptyLabel="Aucun profil (repli Films)"
+                        onChange={(id) => setQualityAssignments({ ...qualityAssignments, animation_profile_id: id })}
+                      />
+                      <ProfileAssignSelect
+                        label="Profil par défaut : SÉRIES"
+                        value={qualityAssignments.tv_profile_id}
+                        profiles={qualityProfiles}
+                        onChange={(id) => setQualityAssignments({ ...qualityAssignments, tv_profile_id: id })}
+                      />
+                      <ProfileAssignSelect
+                        label="Profil par défaut : ANIME"
+                        value={qualityAssignments.anime_profile_id}
+                        profiles={qualityProfiles}
+                        emptyLabel="Aucun profil (repli Séries)"
+                        onChange={(id) => setQualityAssignments({ ...qualityAssignments, anime_profile_id: id })}
+                      />
                    </div>
                 </div>
               </div>
@@ -498,6 +805,166 @@ export function AdminPage() {
           <div className="glass-card p-1">
             <AdminRssFeedManager user={currentUser!} />
           </div>
+        </div>
+      )}
+
+      {activeTab === 'system' && (
+        <div className="animate-premium-fade space-y-10">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
+            <div className="flex items-center gap-4">
+              <Database className="text-green-500" size={24} />
+              <h2 className="text-xl font-black text-white uppercase tracking-tighter">Système & Santé</h2>
+            </div>
+            <button
+              type="button"
+              onClick={refreshSystemHealth}
+              disabled={isHealthLoading}
+              className="px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-all flex items-center gap-2 disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={isHealthLoading ? 'animate-spin' : ''} />
+              Tester maintenant
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {(['prowlarr', 'tmdb', 'emby', 'db'] as const).map((service) => {
+              const status = systemHealth?.[service];
+              const ok = Boolean(status?.ok);
+              const labels: Record<string, string> = {
+                prowlarr: 'Prowlarr',
+                tmdb: 'TMDB',
+                emby: 'Emby',
+                db: 'SQLite'
+              };
+              return (
+                <div key={service} className="glass-card p-5 border-white/5">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{labels[service]}</span>
+                    <span className={`w-2.5 h-2.5 rounded-full ${ok ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.6)]' : status ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.6)]' : 'bg-gray-600'}`} />
+                  </div>
+                  <p className={`text-sm font-black uppercase tracking-tighter ${ok ? 'text-green-400' : status ? 'text-red-400' : 'text-gray-500'}`}>
+                    {!status ? '—' : ok ? 'En ligne' : 'Hors ligne'}
+                  </p>
+                  {status?.latencyMs != null && (
+                    <p className="text-[10px] text-gray-500 mt-2 font-bold">{status.latencyMs} ms</p>
+                  )}
+                  {status?.error && !ok && (
+                    <p className="text-[10px] text-red-400/70 mt-2 line-clamp-2">{status.error}</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 border-b border-white/5 pb-3">
+              <Activity className="text-violet-500" size={20} />
+              <h3 className="text-lg font-black text-white uppercase tracking-tighter">qBittorrent par utilisateur</h3>
+            </div>
+
+            {!systemHealth?.qbitUsers?.length ? (
+              <div className="glass-card p-4 border-white/5 text-gray-500 text-xs">
+                Aucun utilisateur avec URL + clé API qBittorrent configurées.
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
+                {systemHealth.qbitUsers.map((entry: any) => {
+                  const ok = Boolean(entry?.ok);
+                  return (
+                    <div key={entry.userId} className="glass-card px-3 py-2.5 border-white/5">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="text-[11px] font-black text-white uppercase tracking-tight truncate" title={entry.username}>
+                          {entry.username}
+                        </span>
+                        <span className={`shrink-0 w-2 h-2 rounded-full ${ok ? 'bg-green-500' : 'bg-red-500'}`} />
+                      </div>
+                      <p className={`text-[10px] font-black uppercase tracking-widest ${ok ? 'text-green-400' : 'text-red-400'}`}>
+                        {ok ? 'OK' : 'KO'}
+                      </p>
+                      {entry.latencyMs != null && (
+                        <p className="text-[9px] text-gray-500 font-bold">{entry.latencyMs} ms</p>
+                      )}
+                      {entry.error && !ok && (
+                        <p className="text-[9px] text-red-400/70 mt-1 line-clamp-2" title={entry.error}>{entry.error}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="glass-card p-6 border-white/5 space-y-4">
+            <div className="flex items-center gap-3">
+              <HardDrive className="text-blue-500" size={20} />
+              <h3 className="text-lg font-black text-white uppercase tracking-tighter">Sauvegarde SQLite</h3>
+            </div>
+            <p className="text-gray-500 text-sm">Télécharge une copie de la base de données actuelle (`database.sqlite`).</p>
+            <button
+              type="button"
+              onClick={handleDownloadBackup}
+              disabled={isBackupLoading}
+              className="px-6 py-3 rounded-xl bg-blue-600/20 border border-blue-500/30 text-blue-300 text-[10px] font-black uppercase tracking-widest hover:bg-blue-600/30 transition-all disabled:opacity-50"
+            >
+              {isBackupLoading ? 'Téléchargement...' : 'Télécharger la base'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'history' && (
+        <div className="animate-premium-fade space-y-6">
+          <div className="flex items-center justify-between border-b border-white/5 pb-4">
+            <div className="flex items-center gap-4">
+              <Shield className="text-violet-500" size={24} />
+              <h2 className="text-xl font-black text-white uppercase tracking-tighter">Historique admin</h2>
+            </div>
+            <button
+              type="button"
+              onClick={loadActivityLog}
+              disabled={isActivityLoading}
+              className="px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-all flex items-center gap-2 disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={isActivityLoading ? 'animate-spin' : ''} />
+              Actualiser
+            </button>
+          </div>
+
+          {isActivityLoading && activityItems.length === 0 ? (
+            <div className="py-20 text-center text-gray-500 text-sm">Chargement...</div>
+          ) : activityItems.length === 0 ? (
+            <div className="glass-card p-6 text-gray-500 text-sm">Aucun événement enregistré.</div>
+          ) : (
+            <div className="glass-card border-white/5 divide-y divide-white/5 max-h-[70vh] overflow-y-auto">
+              {activityItems.map((entry) => {
+                const detailLine = formatActivityDetails(entry.details);
+                return (
+                  <div key={entry.id} className="px-5 py-4 flex flex-col gap-1.5 sm:flex-row sm:items-start sm:gap-6">
+                    <div className="sm:w-48 shrink-0 space-y-0.5">
+                      <span className="text-[10px] font-black text-violet-400 uppercase tracking-widest block">
+                        {getActivityEventLabel(entry.event_type)}
+                      </span>
+                      <span className="text-[9px] text-gray-600 font-bold block truncate" title={entry.event_type}>
+                        {entry.event_type}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <span className="text-sm text-white font-bold block truncate">{entry.target_label || '—'}</span>
+                      {detailLine && (
+                        <span className="text-[11px] text-gray-400 font-medium block line-clamp-2" title={detailLine}>
+                          {detailLine}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-gray-500 font-bold shrink-0">{entry.actor_username || 'système'}</span>
+                    <span className="text-[10px] text-gray-600 shrink-0 sm:text-right sm:w-36">
+                      {entry.created_at ? new Date(entry.created_at).toLocaleString('fr-FR') : ''}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

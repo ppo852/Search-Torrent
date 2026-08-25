@@ -20,6 +20,55 @@ async function getTmdbToken() {
   return token;
 }
 
+/**
+ * Test connexion TMDB (admin). Accepte access_token / tmdb_access_token en body.
+ */
+export async function testTmdbHandler(req, res) {
+  try {
+    const body = req.body || {};
+    let token =
+      typeof body.access_token === 'string'
+        ? body.access_token.trim()
+        : typeof body.tmdb_access_token === 'string'
+          ? body.tmdb_access_token.trim()
+          : '';
+
+    if (!token) {
+      token = String((await getTmdbToken()) || '').trim();
+    }
+
+    if (!token) {
+      return res.status(400).json({ success: false, error: 'TMDB non configuré' });
+    }
+
+    const response = await fetch('https://api.themoviedb.org/3/configuration', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 8000,
+    });
+
+    if (!response.ok) {
+      return res.status(502).json({
+        success: false,
+        error: `HTTP ${response.status}`,
+      });
+    }
+
+    const data = await response.json().catch(() => ({}));
+    return res.json({
+      success: true,
+      imagesBaseUrl: data?.images?.secure_base_url || null,
+    });
+  } catch (error) {
+    return res.status(502).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Échec de connexion TMDB',
+    });
+  }
+}
+
 async function fetchTmdb(path, params) {
   const key = cacheKey(path, params);
   const now = Date.now();
@@ -141,6 +190,149 @@ export async function getUpcomingTvHandler(req, res) {
     res.json({ results, page: data?.page || 1, totalPages: data?.total_pages || 1 });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : 'Erreur serveur' });
+  }
+}
+
+function cleanTitle(title) {
+  const yearMatch = title.match(/\b(19|20)\d{2}\b/);
+  const year = yearMatch ? yearMatch[0] : '';
+
+  let q = title
+    .replace(/\{imdb-[^\}]+\}/gi, '')
+    .replace(/\[tvdbid-[^\]]+\]/gi, '')
+    .replace(/\{tmdb-[^\}]+\}/gi, '')
+    .replace(/\[tmdbid-[^\]]+\]/gi, '')
+    .replace(/\(\d{4}\).*$/, '')
+    .replace(/[._-]\d{4}[._-].*$/, '')
+    .replace(/[._-]\d{4}$/, '')
+    .replace(/[._-](480p|720p|1080p|2160p|4k).*$/i, '')
+    .replace(/[._-](bluray|brrip|webrip|web-dl|webdl|hdtv|dvdrip).*$/i, '')
+    .replace(/[._-](x264|x265|h264|h265|hevc|xvid|divx|avc).*$/i, '')
+    .replace(/-[A-Z0-9]+$/, '')
+    .replace(/[._+\-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (year && q && !q.includes(year)) {
+    q = `${q} ${year}`;
+  }
+
+  return q;
+}
+
+function mapSearchResultItem(item, type) {
+  return {
+    id: item.id,
+    title: type === 'movie' ? item.title : item.name,
+    originalTitle: type === 'movie' ? item.original_title : item.original_name,
+    releaseDate: type === 'movie' ? item.release_date : item.first_air_date,
+    posterPath: item.poster_path ? `https://image.tmdb.org/t/p/w185${item.poster_path}` : null,
+    type,
+    overview: item.overview || '',
+    voteAverage: typeof item.vote_average === 'number' ? item.vote_average : 0,
+    genres: Array.isArray(item.genre_ids)
+      ? item.genre_ids.map((id) => ({ id, name: '' }))
+      : []
+  };
+}
+
+function hasPlayableTrailer(videos) {
+  return videos.some(
+    (v) => v?.key && (v.site === 'YouTube' || v.site === 'Vimeo')
+  );
+}
+
+async function fetchVideosForMedia(mediaType, id) {
+  const fr = await fetchTmdb(`/${mediaType}/${id}/videos`, { language: 'fr-FR' });
+  const frResults = Array.isArray(fr?.results) ? fr.results : [];
+  if (hasPlayableTrailer(frResults)) {
+    return fr;
+  }
+  return fetchTmdb(`/${mediaType}/${id}/videos`, {});
+}
+
+export async function searchTmdbHandler(req, res) {
+  try {
+    const rawQuery = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    if (!rawQuery) {
+      return res.json([]);
+    }
+
+    const mediaType = req.query.mediaType === 'movie' || req.query.mediaType === 'tv'
+      ? req.query.mediaType
+      : 'all';
+    const originalQuery = typeof req.query.originalQuery === 'string'
+      ? req.query.originalQuery
+      : rawQuery;
+    const query = cleanTitle(rawQuery);
+    const isAnime = /anime|アニメ/.test(originalQuery.toLowerCase());
+    const types = mediaType === 'all' ? ['movie', 'tv'] : [mediaType];
+    const results = [];
+
+    for (const type of types) {
+      try {
+        const params = {
+          query,
+          language: 'fr-FR',
+          include_adult: 'false'
+        };
+        if (isAnime) {
+          params.with_genres = '16';
+        }
+
+        const data = await fetchTmdb(`/search/${type}`, params);
+        for (const item of data?.results || []) {
+          results.push(mapSearchResultItem(item, type));
+        }
+      } catch {
+        // ignore per-type failures
+      }
+    }
+
+    results.sort((a, b) => b.voteAverage - a.voteAverage);
+    res.json(results);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erreur serveur';
+    const status = message.includes('token manquant') ? 503 : 500;
+    res.status(status).json({ error: message });
+  }
+}
+
+export async function getMovieDetailsHandler(req, res) {
+  try {
+    const data = await fetchTmdb(`/movie/${req.params.id}`, { language: 'fr-FR' });
+    const videos = await fetchVideosForMedia('movie', req.params.id);
+    res.json({ ...data, videos });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erreur serveur';
+    const status = message.includes('token manquant') ? 503 : 500;
+    res.status(status).json({ error: message });
+  }
+}
+
+export async function getTvDetailsHandler(req, res) {
+  try {
+    const data = await fetchTmdb(`/tv/${req.params.id}`, { language: 'fr-FR' });
+    const videos = await fetchVideosForMedia('tv', req.params.id);
+    res.json({ ...data, videos });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erreur serveur';
+    const status = message.includes('token manquant') ? 503 : 500;
+    res.status(status).json({ error: message });
+  }
+}
+
+export async function getTvSeasonDetailsHandler(req, res) {
+  try {
+    const data = await fetchTmdb(
+      `/tv/${req.params.id}/season/${req.params.seasonNumber}`,
+      { language: 'fr-FR' }
+    );
+    res.json(data);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erreur serveur';
+    const status = message.includes('token manquant') ? 503 : 500;
+    res.status(status).json({ error: message });
   }
 }
 

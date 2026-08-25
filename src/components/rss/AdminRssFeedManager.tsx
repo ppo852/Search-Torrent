@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Database, RefreshCw, Clock, Globe, ShieldAlert } from 'lucide-react';
+import { Plus, Trash2, Database, RefreshCw, Clock, Globe } from 'lucide-react';
 import { useAuthStore } from '../../stores/authStore';
 import { ConfirmModal } from '../ui/ConfirmModal';
+import { showErrorToast, showToast } from '../../stores/toastStore';
+import { api } from '../../services/api';
 
 interface CacheInfo {
   lastUpdated: string;
@@ -61,14 +63,11 @@ function formatCacheSize(bytes: number): string {
 export function AdminRssFeedManager({ user: propUser }: AdminRssFeedManagerProps) {
   const storeUser = useAuthStore((state) => state.user);
   const user = propUser || storeUser;
-  
+
   const [feeds, setFeeds] = useState<RssFeed[]>([]);
   const [newFeed, setNewFeed] = useState({ feed_name: '', feed_url: '' });
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [cacheSummary, setCacheSummary] = useState<CacheSummary | null>(null);
-  const token = useAuthStore((state) => state.token);
 
   useEffect(() => {
     if (user) loadFeeds();
@@ -77,51 +76,34 @@ export function AdminRssFeedManager({ user: propUser }: AdminRssFeedManagerProps
   const loadCacheStatus = async () => {
     if (!user?.is_admin) return;
     try {
-      const response = await fetch('/api/rss/cache/stats', {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data: CacheStatsResponse = await response.json();
-        setCacheSummary(data.summary);
-        setFeeds(data.feeds);
-      }
+      const data: CacheStatsResponse = await api.getRssCacheStats();
+      setCacheSummary(data.summary);
+      setFeeds(data.feeds);
     } catch (err) {}
   };
 
   const loadFeeds = async () => {
     try {
-      const response = await fetch('/api/rss', {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (!response.ok) throw new Error('Échec du chargement');
-      const data = await response.json();
+      const data = await api.getRssFeeds();
       setFeeds(data);
       if (user?.is_admin) loadCacheStatus();
     } catch (err) {
-      setError('Erreur de synchronisation des flux');
+      showErrorToast('Erreur de synchronisation des flux');
     }
   };
 
   const handleAddFeed = async () => {
     if (!newFeed.feed_name || !newFeed.feed_url) {
-      setError('Champs requis manquants');
+      showErrorToast('Champs requis manquants');
       return;
     }
     try {
-      const response = await fetch('/api/rss', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(newFeed),
-      });
-      if (!response.ok) throw new Error('Échec de l\'ajout');
+      await api.createRssFeed(newFeed);
       setNewFeed({ feed_name: '', feed_url: '' });
-      setSuccess('Nouveau flux enregistré');
+      showToast('Nouveau flux enregistré');
       loadFeeds();
     } catch (err) {
-      setError('Erreur lors de l\'enregistrement');
+      showErrorToast('Erreur lors de l\'enregistrement');
     }
   };
 
@@ -136,15 +118,11 @@ export function AdminRssFeedManager({ user: propUser }: AdminRssFeedManagerProps
   const confirmDelete = async () => {
     if (!feedToDelete) return;
     try {
-      const response = await fetch(`/api/rss/${feedToDelete}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (!response.ok) throw new Error('Échec de suppression');
-      setSuccess('Flux supprimé');
+      await api.deleteRssFeed(feedToDelete);
+      showToast('Flux supprimé');
       loadFeeds();
     } catch (err) {
-      setError('Erreur de suppression');
+      showErrorToast('Erreur de suppression');
     } finally {
       setFeedToDelete(null);
     }
@@ -153,20 +131,11 @@ export function AdminRssFeedManager({ user: propUser }: AdminRssFeedManagerProps
   const handleRefreshFeed = async (feedId: string) => {
     try {
       setLoading(true);
-      setError('');
-      const response = await fetch('/api/rss/cache/manage', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ action: 'refresh', type: 'rss', feedId: feedId })
-      });
-      if (!response.ok) throw new Error('Rafraîchissement échoué');
-      setSuccess('Cache rafraîchi');
+      await api.manageRssCache({ action: 'refresh', type: 'rss', feedId });
+      showToast('Cache rafraîchi');
       loadCacheStatus();
     } catch (err) {
-      setError('Erreur de rafraîchissement');
+      showErrorToast('Erreur de rafraîchissement');
     } finally {
       setLoading(false);
     }
@@ -174,20 +143,11 @@ export function AdminRssFeedManager({ user: propUser }: AdminRssFeedManagerProps
 
   const handleClearCache = async (type: 'rss' | 'tmdb' | 'all') => {
     try {
-      setError('');
-      const response = await fetch('/api/rss/cache/manage', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ action: 'clear', type: type })
-      });
-      if (!response.ok) throw new Error('Échec du nettoyage');
-      setSuccess('Cache système nettoyé');
+      await api.manageRssCache({ action: 'clear', type });
+      showToast('Cache système nettoyé');
       loadCacheStatus();
     } catch (err) {
-      setError('Erreur lors du nettoyage');
+      showErrorToast('Erreur lors du nettoyage');
     }
   };
 
@@ -195,13 +155,6 @@ export function AdminRssFeedManager({ user: propUser }: AdminRssFeedManagerProps
 
   return (
     <div className="animate-premium-fade space-y-10 p-2">
-      {(error || success) && (
-        <div className={`p-4 rounded-2xl border flex items-center gap-4 ${error ? 'bg-red-600/10 border-red-600/20 text-red-400' : 'bg-green-600/10 border-green-600/20 text-green-400'}`}>
-           <ShieldAlert size={18} />
-           <span className="text-[10px] font-black uppercase tracking-widest">{error || success}</span>
-        </div>
-      )}
-
       {user.is_admin && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="glass-card p-8 space-y-6">
@@ -268,7 +221,7 @@ export function AdminRssFeedManager({ user: propUser }: AdminRssFeedManagerProps
                       <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest truncate">{feed.feed_url}</p>
                    </div>
                 </div>
-                
+
                 {feed.cache && (
                   <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${feed.cache.isFresh ? 'bg-green-500/10 text-green-400' : 'bg-amber-500/10 text-amber-400'}`}>
                     <Clock size={12} />
@@ -284,7 +237,7 @@ export function AdminRssFeedManager({ user: propUser }: AdminRssFeedManagerProps
                    </div>
                 )}
               </div>
-              
+
               {user.is_admin && (
                 <div className="flex items-center gap-3 self-end sm:self-center">
                   <button onClick={() => handleRefreshFeed(feed.id)} disabled={loading} className="p-3 bg-blue-600/10 text-blue-500 hover:bg-blue-600 hover:text-white rounded-xl transition-all shadow-lg" title="Rafraîchir">

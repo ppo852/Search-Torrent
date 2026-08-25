@@ -3,6 +3,7 @@ import { Search, ChevronDown, Check, Film, Tv, Sparkles } from 'lucide-react';
 import type { CategoryType, TmdbResult } from '../types';
 import { tmdbAPI } from '../../services/tmdb/tmdb';
 import { useNavigate } from 'react-router-dom';
+import { filterTmdbBySearchCategory, hasTmdbAnimationGenre } from '../../lib/tmdb-category-filter';
 
 interface SearchBarProps {
   onSearch: (query: string, category: CategoryType | null) => void;
@@ -10,6 +11,7 @@ interface SearchBarProps {
 
 const categories: { value: CategoryType; label: string }[] = [
   { value: 'movies', label: 'Films' },
+  { value: 'animation', label: 'Animation' },
   { value: 'tv', label: 'Séries TV' },
   { value: 'anime', label: 'Anime' },
   { value: 'music', label: 'Musique' },
@@ -17,6 +19,12 @@ const categories: { value: CategoryType; label: string }[] = [
   { value: 'books', label: 'Livres' },
   { value: 'all', label: 'Tout' },
 ];
+
+function suggestionTypeLabel(item: TmdbResult): string {
+  const isAnimation = hasTmdbAnimationGenre(item);
+  if (item.type === 'movie') return isAnimation ? 'Animation' : 'Film';
+  return isAnimation ? 'Anime' : 'Série';
+}
 
 export function SearchBar({ onSearch }: SearchBarProps) {
   const [query, setQuery] = useState('');
@@ -43,7 +51,7 @@ export function SearchBar({ onSearch }: SearchBarProps) {
 
   // Fetch suggestions with debounce
   useEffect(() => {
-    const showSuggestions = category === null || category === 'all' || category === 'movies' || category === 'tv' || category === 'anime';
+    const showSuggestions = category === null || category === 'all' || category === 'movies' || category === 'animation' || category === 'tv' || category === 'anime';
     if (query.trim().length < 2 || !showSuggestions) {
       setSuggestions([]);
       setIsSuggesting(false);
@@ -52,10 +60,16 @@ export function SearchBar({ onSearch }: SearchBarProps) {
 
     const timer = setTimeout(async () => {
       try {
-        const type = category === 'movies' ? 'movie' : (category === 'tv' || category === 'anime') ? 'tv' : 'multi';
+        const type =
+          category === 'movies' || category === 'animation'
+            ? 'movie'
+            : (category === 'tv' || category === 'anime')
+              ? 'tv'
+              : 'multi';
         const results = await tmdbAPI.searchSuggestions(query, type as any);
-        setSuggestions(results.slice(0, 6));
-        setIsSuggesting(results.length > 0);
+        const filtered = filterTmdbBySearchCategory(results, category);
+        setSuggestions(filtered.slice(0, 6));
+        setIsSuggesting(filtered.length > 0);
       } catch (err) {
         setSuggestions([]);
       }
@@ -179,7 +193,7 @@ export function SearchBar({ onSearch }: SearchBarProps) {
                 onClick={() => handleSuggestionClick(s)}
                 className="flex items-center gap-4 p-3 rounded-2xl hover:bg-white/5 transition-all text-left group"
               >
-                <div className="shrink-0 w-12 h-16 rounded-lg overflow-hidden bg-gray-900 border border-white/5">
+                <div className="relative shrink-0 w-12 h-16 rounded-lg overflow-hidden bg-gray-900 border border-white/5">
                   {s.posterPath ? (
                     <img src={s.posterPath} alt={s.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
                   ) : (
@@ -192,7 +206,7 @@ export function SearchBar({ onSearch }: SearchBarProps) {
                   <h4 className="text-sm font-black text-white uppercase tracking-tighter truncate group-hover:text-blue-400 transition-colors">{s.title}</h4>
                   <div className="flex items-center gap-2 mt-1">
                     <span className="text-[10px] font-bold text-gray-600 uppercase tracking-widest">{s.releaseDate?.split('-')[0]}</span>
-                    <span className="text-[9px] px-1.5 py-0.5 bg-white/5 text-gray-500 rounded uppercase font-black">{s.type === 'movie' ? 'Film' : 'Série'}</span>
+                    <span className="text-[9px] px-1.5 py-0.5 bg-white/5 text-gray-500 rounded uppercase font-black">{suggestionTypeLabel(s)}</span>
                   </div>
                 </div>
               </button>

@@ -1,20 +1,25 @@
 import type { TmdbResult } from '../../types';
 import { formatYear } from '../../utils/formatters';
+import type { PosterBadge } from '../../lib/poster-badge';
+import { PosterBadgeStack } from './PosterBadgeStack';
 
 interface MediaCardProps {
   media: TmdbResult;
   onClick: (media: TmdbResult) => void;
+  posterBadge?: PosterBadge | PosterBadge[] | null;
 }
 
-export function MediaCard({ media, onClick }: MediaCardProps) {
+export function MediaCard({ media, onClick, posterBadge }: MediaCardProps) {
+  const badges = Array.isArray(posterBadge) ? posterBadge : posterBadge ? [posterBadge] : [];
+
   return (
     <div
       className="flex-shrink-0 cursor-pointer w-[160px] md:w-[200px] animate-premium-fade"
       onClick={() => onClick(media)}
     >
       <div className="glass-card relative overflow-hidden group/card hover:scale-[1.03] hover:-translate-y-2 hover:shadow-blue-500/10">
-        {/* Poster Image */}
-        <div className="aspect-[2/3] overflow-hidden">
+        <div className="relative aspect-[2/3] overflow-hidden">
+          {badges.length > 0 && <PosterBadgeStack badges={badges} />}
           <img
             src={media.posterPath?.replace('/w185/', '/w500/') || ''}
             alt={media.title}
@@ -23,12 +28,11 @@ export function MediaCard({ media, onClick }: MediaCardProps) {
           />
         </div>
 
-        {/* Overlay with info */}
         <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/20 to-transparent opacity-0 group-hover/card:opacity-100 transition-all duration-300 flex flex-col justify-end p-4">
           <h3 className="text-white font-bold text-sm md:text-base line-clamp-2 leading-tight mb-2 transform translate-y-4 group-hover/card:translate-y-0 transition-transform duration-300">
             {media.title}
           </h3>
-          
+
           <div className="flex items-center justify-between text-[10px] md:text-xs text-gray-300 transform translate-y-4 group-hover/card:translate-y-0 transition-transform duration-300 delay-75">
             <div className="flex items-center gap-2">
               <span className="px-1.5 py-0.5 bg-white/10 rounded uppercase font-bold tracking-wider">
@@ -44,7 +48,6 @@ export function MediaCard({ media, onClick }: MediaCardProps) {
           </div>
         </div>
 
-        {/* Subtle border shine effect */}
         <div className="absolute inset-0 border border-white/0 group-hover/card:border-white/20 rounded-2xl transition-colors duration-300" />
       </div>
     </div>

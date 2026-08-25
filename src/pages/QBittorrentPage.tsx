@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useGlobalDragAndDrop } from '../hooks/useGlobalDragAndDrop';
-import { Trash2, ArrowDown, X, Upload, Pause, Play } from 'lucide-react';
+import { Trash2, ArrowDown, X, Upload, Pause, Play, MoreVertical, RefreshCw, CheckCircle, Download } from 'lucide-react';
+import { EmptyState } from '../components/ui/EmptyState';
+import { showErrorToast, showToast, showApiErrorToast } from '../stores/toastStore';
 import { StatsDisplay } from '../components/Stats/StatsDisplay';
 import { useQBittorrentStats } from '../hooks/useQBittorrentStats';
 import { Torrent, SortField } from '../types/qbittorrent';
@@ -15,8 +18,10 @@ import {
 import { useTorrentFilters } from '../hooks/useTorrentFilters';
 import { useTorrentActions } from '../hooks/useTorrentActions';
 import { useTorrentUpload } from '../hooks/useTorrentUpload';
+import { api } from '../services/api';
 
 export const QBittorrentPage: React.FC = () => {
+  const navigate = useNavigate();
   const [invalidDrop, setInvalidDrop] = React.useState(false);
   const [droppedTorrentFiles, setDroppedTorrentFiles] = useState<File[]>([]);
   const [torrents, setTorrents] = useState<Torrent[]>([]);
@@ -24,6 +29,8 @@ export const QBittorrentPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [categories, setCategories] = useState<string[]>([]);
   const [syncRid, setSyncRid] = useState<number>(0);
+  const [selectionMenuOpen, setSelectionMenuOpen] = useState(false);
+  const selectionMenuRef = useRef<HTMLDivElement>(null);
   
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
@@ -40,11 +47,7 @@ export const QBittorrentPage: React.FC = () => {
   const fetchTorrents = async () => {
     try {
       setError(null);
-      const response = await fetch(`/api/qbittorrent/sync/maindata?rid=${syncRid}`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('auth_token')}` }
-      });
-      if (!response.ok) throw new Error('Erreur de synchronisation');
-      const data = await response.json();
+      const data = await api.getQbitMainData(syncRid);
       if (data.rid) setSyncRid(data.rid);
       
       if (syncRid === 0 || data.full_update) {
@@ -74,17 +77,23 @@ export const QBittorrentPage: React.FC = () => {
 
   const fetchCategories = async () => {
     try {
-      const response = await fetch('/api/qbittorrent/categories', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('auth_token')}` }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setCategories(Object.keys(data));
-      }
+      const data = await api.getQbitCategories();
+      setCategories(Object.keys(data || {}));
     } catch (err) {}
   };
 
-  const { filteredTorrents, searchQuery, setSearchQuery, currentStatus, setCurrentStatus, currentCategory, setCurrentCategory } = useTorrentFilters({ torrents });
+  const {
+    filteredTorrents,
+    searchQuery,
+    setSearchQuery,
+    currentStatus,
+    setCurrentStatus,
+    currentCategory,
+    setCurrentCategory,
+    currentTracker,
+    setCurrentTracker,
+    trackers
+  } = useTorrentFilters({ torrents });
   const { api: torrentApi, selectedTorrents, isDeleteModalOpen, deleteWithFiles, setDeleteWithFiles, toggleTorrentSelection, deselectAllTorrents, handleSingleDelete, handleMultipleDelete, confirmDelete, cancelDelete, torrentToDelete } = useTorrentActions({ fetchTorrents });
   const { isModalOpen: isAddModalOpen, openModal: openAddModal, closeModal: closeAddModal } = useTorrentUpload(() => { fetchTorrents(); fetchCategories(); });
 
@@ -121,11 +130,47 @@ export const QBittorrentPage: React.FC = () => {
   };
 
   useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, currentStatus, currentCategory, currentTracker]);
+
+  useEffect(() => {
     fetchTorrents();
     fetchCategories();
     const interval = setInterval(fetchTorrents, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!selectionMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (selectionMenuRef.current && !selectionMenuRef.current.contains(e.target as Node)) {
+        setSelectionMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [selectionMenuOpen]);
+
+  useEffect(() => {
+    if (selectedTorrents.size === 0) setSelectionMenuOpen(false);
+  }, [selectedTorrents.size]);
+
+  const selectedHashes = () => Array.from(selectedTorrents).join('|');
+
+  const runSelectionAction = async (
+    action: () => Promise<void>,
+    successMsg: string
+  ) => {
+    try {
+      await action();
+      showToast(successMsg);
+      fetchTorrents();
+    } catch (err: any) {
+      showApiErrorToast(err, 'Action échouée');
+    } finally {
+      setSelectionMenuOpen(false);
+    }
+  };
 
   return (
     <>
@@ -174,6 +219,9 @@ export const QBittorrentPage: React.FC = () => {
             categories={categories}
             currentCategory={currentCategory}
             onCategoryChange={setCurrentCategory}
+            trackers={trackers}
+            currentTracker={currentTracker}
+            onTrackerChange={setCurrentTracker}
           />
         </div>
         
@@ -191,10 +239,22 @@ export const QBittorrentPage: React.FC = () => {
               <button onClick={fetchTorrents} className="px-6 py-2 bg-white/5 border border-white/10 rounded-xl text-white font-bold hover:bg-white/10 transition-all">Réessayer</button>
             </div>
           ) : filteredTorrents.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-32 text-center opacity-30">
-               <Upload size={48} className="text-gray-500 mb-4" />
-               <p className="text-gray-500 text-lg font-black uppercase tracking-tighter">Aucun flux actif</p>
-            </div>
+            <EmptyState
+              icon={<Upload size={40} />}
+              title={torrents.length === 0 ? 'Aucun torrent actif' : 'Aucun résultat'}
+              description={torrents.length === 0 ? 'Lancez une recherche ou déposez un fichier .torrent.' : 'Ajustez les filtres pour retrouver vos torrents.'}
+              action={
+                torrents.length === 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => navigate('/new-torrent')}
+                    className="px-6 py-2.5 premium-gradient rounded-xl text-white font-black text-[10px] uppercase tracking-widest"
+                  >
+                    Aller à la recherche
+                  </button>
+                ) : undefined
+              }
+            />
           ) : (
             <div className="divide-y divide-white/5">
               <div ref={torrentsContainerRef}>
@@ -237,16 +297,75 @@ export const QBittorrentPage: React.FC = () => {
       )}
 
       {selectedTorrents.size > 0 && (
-        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 glass-card p-4 flex items-center gap-6 shadow-[0_20px_50px_rgba(0,0,0,0.5)] border-blue-500/30 animate-premium-slide-up">
+        <div className="fixed bottom-24 lg:bottom-10 left-1/2 -translate-x-1/2 z-50 glass-card p-3 sm:p-4 flex flex-wrap items-center justify-center gap-4 sm:gap-6 shadow-[0_20px_50px_rgba(0,0,0,0.5)] border-blue-500/30 animate-premium-slide-up max-w-[95vw]">
           <div className="flex flex-col">
             <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Sélection active</span>
             <span className="text-white font-bold text-sm">{selectedTorrents.size} Flux</span>
           </div>
-          <div className="h-8 w-[1px] bg-white/10 mx-2" />
+          <div className="h-8 w-[1px] bg-white/10 mx-2 hidden sm:block" />
           <div className="flex items-center gap-2">
-            <button onClick={() => torrentApi.pauseTorrent(Array.from(selectedTorrents).join('|')).then(fetchTorrents)} className="p-3 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 transition-all"><Pause size={18} /></button>
-            <button onClick={() => torrentApi.resumeTorrent(Array.from(selectedTorrents).join('|')).then(fetchTorrents)} className="p-3 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 transition-all"><Play size={18} /></button>
+            <button onClick={() => torrentApi.pauseTorrent(Array.from(selectedTorrents).join('|')).then(() => { fetchTorrents(); showToast('Torrent(s) en pause'); }).catch(() => showErrorToast('Erreur pause'))} className="p-3 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 transition-all"><Pause size={18} /></button>
+            <button onClick={() => torrentApi.resumeTorrent(Array.from(selectedTorrents).join('|')).then(() => { fetchTorrents(); showToast('Torrent(s) repris'); }).catch(() => showErrorToast('Erreur reprise'))} className="p-3 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 transition-all"><Play size={18} /></button>
             <button onClick={handleMultipleDelete} className="p-3 rounded-xl bg-red-600/10 hover:bg-red-600/20 text-red-400 transition-all" title="Supprimer la sélection"><Trash2 size={18} /></button>
+            <div className="relative" ref={selectionMenuRef}>
+              <button
+                type="button"
+                title="Plus d'actions"
+                onClick={() => setSelectionMenuOpen((o) => !o)}
+                className={`p-3 rounded-xl transition-all ${selectionMenuOpen ? 'bg-white/10 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-400'}`}
+              >
+                <MoreVertical size={18} />
+              </button>
+              {selectionMenuOpen && (
+                <div className="absolute bottom-full right-0 mb-2 w-56 rounded-2xl shadow-[0_20px_40px_rgba(0,0,0,0.5)] bg-gray-900 border border-white/10 z-[9999] overflow-hidden animate-premium-fade">
+                  <div className="p-1.5 space-y-0.5">
+                    <button
+                      type="button"
+                      className="flex w-full items-center px-4 py-3 text-[10px] font-black tracking-widest uppercase rounded-xl text-gray-400 hover:bg-white/5 hover:text-white transition-all"
+                      onClick={() =>
+                        runSelectionAction(
+                          () => api.reannounceTrackers(selectedHashes()),
+                          'Trackers rafraîchis'
+                        )
+                      }
+                    >
+                      <RefreshCw size={14} className="mr-3" />
+                      Rafraîchir
+                    </button>
+                    <button
+                      type="button"
+                      className="flex w-full items-center px-4 py-3 text-[10px] font-black tracking-widest uppercase rounded-xl text-gray-400 hover:bg-white/5 hover:text-white transition-all"
+                      onClick={() =>
+                        runSelectionAction(
+                          () => api.recheckTorrent(selectedHashes()),
+                          'Vérification lancée'
+                        )
+                      }
+                    >
+                      <CheckCircle size={14} className="mr-3" />
+                      Vérification
+                    </button>
+                    <button
+                      type="button"
+                      className="flex w-full items-center px-4 py-3 text-[10px] font-black tracking-widest uppercase rounded-xl text-gray-400 hover:bg-white/5 hover:text-white transition-all disabled:opacity-40"
+                      disabled={selectedTorrents.size !== 1}
+                      title={selectedTorrents.size !== 1 ? 'Sélectionne un seul torrent' : 'Télécharger .torrent'}
+                      onClick={() => {
+                        const hash = Array.from(selectedTorrents)[0];
+                        const torrent = torrents.find((t) => t.hash === hash);
+                        runSelectionAction(
+                          () => api.exportTorrentFile(hash, torrent?.name || hash),
+                          'Fichier .torrent téléchargé'
+                        );
+                      }}
+                    >
+                      <Download size={14} className="mr-3" />
+                      Télécharger .torrent
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
             <button onClick={deselectAllTorrents} className="p-3 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 transition-all"><X size={18} /></button>
           </div>
         </div>

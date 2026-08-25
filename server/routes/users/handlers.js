@@ -26,7 +26,7 @@ export async function getUsersHandler(req, res) {
  */
 export async function createUserHandler(req, res) {
   try {
-    const { username, password, is_admin, qbit_url, qbit_username, qbit_password, download_path_movies, download_path_series, download_path_anime } = req.body;
+    const { username, password, is_admin, qbit_url, qbit_api_key, download_path_movies, download_path_series, download_path_anime, download_path_animation } = req.body;
     
     // Validation basique
     if (!username || !password) {
@@ -53,7 +53,7 @@ export async function createUserHandler(req, res) {
     
     // Insertion dans la base de données
     const result = await run(
-      `INSERT INTO users (id, username, password, is_admin, created_at, qbit_url, qbit_username, qbit_password, download_path_movies, download_path_series, download_path_anime) 
+      `INSERT INTO users (id, username, password, is_admin, created_at, qbit_url, qbit_api_key, download_path_movies, download_path_series, download_path_anime, download_path_animation) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         userId,
@@ -62,24 +62,27 @@ export async function createUserHandler(req, res) {
         adminFlag,
         now,
         qbit_url || null,
-        qbit_username || null,
-        qbit_password || null,
+        qbit_api_key || null,
         download_path_movies || null,
         download_path_series || null,
-        download_path_anime || null
+        download_path_anime || null,
+        download_path_animation || null
       ]
     );
     
     if (result && result.changes > 0) {
       // Récupérer l'utilisateur nouvellement créé sans le mot de passe
       const newUser = await get(
-        `SELECT id, username, is_admin, created_at, qbit_url, qbit_username, download_path_movies, download_path_series, download_path_anime FROM users WHERE id = ?`,
+        `SELECT id, username, is_admin, created_at, qbit_url, download_path_movies, download_path_series, download_path_anime, download_path_animation,
+                (CASE WHEN qbit_api_key IS NOT NULL AND trim(qbit_api_key) != '' THEN 1 ELSE 0 END) AS has_qbit_api_key
+         FROM users WHERE id = ?`,
         [userId]
       );
       
       res.status(201).json({
         ...newUser,
-        is_admin: !!newUser.is_admin
+        is_admin: !!newUser.is_admin,
+        has_qbit_api_key: !!newUser.has_qbit_api_key
       });
     } else {
       res.status(500).json({ error: 'Erreur lors de la création de l\'utilisateur' });
@@ -126,12 +129,13 @@ export async function updateUserHandler(req, res) {
       password, 
       is_admin, 
       qbit_url, 
-      qbit_username, 
-      qbit_password,
+      qbit_api_key,
       download_path_movies,
       download_path_series,
       download_path_anime,
-      allow_force_interactive_download
+      download_path_animation,
+      allow_force_interactive_download,
+      last_seen_app_version
     } = req.body;
     
     // Vérifier si l'utilisateur qui fait la requête est admin ou l'utilisateur demandé
@@ -177,16 +181,10 @@ export async function updateUserHandler(req, res) {
       updateFields.push('qbit_url = ?');
       params.push(qbit_url || null);
     }
-    
-    if (typeof qbit_username !== 'undefined') {
-      updateFields.push('qbit_username = ?');
-      params.push(qbit_username || null);
-    }
-    
-    // Le mot de passe qBittorrent : ne mettre à jour que si une nouvelle valeur non vide est fournie
-    if (typeof qbit_password === 'string' && qbit_password.trim() !== '') {
-      updateFields.push('qbit_password = ?');
-      params.push(qbit_password);
+
+    if (typeof qbit_api_key === 'string' && qbit_api_key.trim() !== '') {
+      updateFields.push('qbit_api_key = ?');
+      params.push(qbit_api_key.trim());
     }
 
     if (download_path_movies !== undefined) {
@@ -204,9 +202,19 @@ export async function updateUserHandler(req, res) {
       params.push(download_path_anime);
     }
 
+    if (download_path_animation !== undefined) {
+      updateFields.push('download_path_animation = ?');
+      params.push(download_path_animation);
+    }
+
     if (typeof allow_force_interactive_download !== 'undefined' && req.user.is_admin) {
       updateFields.push('allow_force_interactive_download = ?');
       params.push(allow_force_interactive_download ? 1 : 0);
+    }
+
+    if (typeof last_seen_app_version === 'string') {
+      updateFields.push('last_seen_app_version = ?');
+      params.push(last_seen_app_version.trim() || null);
     }
     
     // S'il n'y a rien à mettre à jour
@@ -226,14 +234,18 @@ export async function updateUserHandler(req, res) {
     if (result && result.changes > 0) {
       // Récupérer l'utilisateur mis à jour
       const updatedUser = await get(
-        `SELECT id, username, is_admin, created_at, qbit_url, qbit_username, download_path_movies, download_path_series, download_path_anime, allow_force_interactive_download FROM users WHERE id = ?`,
+        `SELECT id, username, is_admin, created_at, qbit_url, download_path_movies, download_path_series, download_path_anime, download_path_animation, allow_force_interactive_download, last_seen_app_version,
+                (CASE WHEN qbit_api_key IS NOT NULL AND trim(qbit_api_key) != '' THEN 1 ELSE 0 END) AS has_qbit_api_key
+         FROM users WHERE id = ?`,
         [id]
       );
       
       res.json({
         ...updatedUser,
         is_admin: !!updatedUser.is_admin,
-        allow_force_interactive_download: !!updatedUser.allow_force_interactive_download
+        allow_force_interactive_download: !!updatedUser.allow_force_interactive_download,
+        has_qbit_api_key: !!updatedUser.has_qbit_api_key,
+        last_seen_app_version: updatedUser.last_seen_app_version || null
       });
     } else {
       res.status(500).json({ error: 'Erreur lors de la mise à jour de l\'utilisateur' });

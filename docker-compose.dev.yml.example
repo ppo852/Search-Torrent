@@ -14,8 +14,6 @@ services:
       - NODE_ENV=production
       - PORT=3001
       - JWT_SECRET=dev_secret_changez_moi
-      - ADMIN_USERNAME=admin
-      - ADMIN_PASSWORD=admin
       - LOG_LEVEL=debug
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80"]

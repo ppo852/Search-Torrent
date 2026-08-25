@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Shield, HardDrive, Key, Folder, CheckCircle, AlertCircle, Server, Globe, User, Lock, ShieldCheck } from 'lucide-react';
+import { X, Save, Shield, HardDrive, Key, Folder, CheckCircle, AlertCircle, Server, Globe, ShieldCheck } from 'lucide-react';
 import api from '../../services/api';
 import { useAuthStore } from '../../stores/authStore';
 
@@ -8,11 +8,11 @@ interface UserData {
   username: string;
   is_admin: boolean;
   qbit_url?: string;
-  qbit_username?: string;
-  qbit_password?: string;
+  has_qbit_api_key?: boolean;
   download_path_movies?: string;
   download_path_series?: string;
   download_path_anime?: string;
+  download_path_animation?: string;
   allow_force_interactive_download?: boolean;
 }
 
@@ -30,11 +30,11 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ user, isOp
   const [activeTab, setActiveTab] = useState<TabType>('qbit');
   const [settings, setSettings] = useState({
     qbit_url: '',
-    qbit_username: '',
-    qbit_password: '',
+    qbit_api_key: '',
     download_path_movies: '',
     download_path_series: '',
     download_path_anime: '',
+    download_path_animation: '',
     allow_force_interactive_download: false,
   });
   const [newPassword, setNewPassword] = useState('');
@@ -46,11 +46,11 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ user, isOp
     if (user && isOpen) {
       setSettings({
         qbit_url: user.qbit_url || '',
-        qbit_username: user.qbit_username || '',
-        qbit_password: user.qbit_password || '',
+        qbit_api_key: '',
         download_path_movies: user.download_path_movies || '',
         download_path_series: user.download_path_series || '',
         download_path_anime: user.download_path_anime || '',
+        download_path_animation: user.download_path_animation || '',
         allow_force_interactive_download: !!user.allow_force_interactive_download,
       });
       setNewPassword('');
@@ -69,9 +69,9 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ user, isOp
     try {
       const updates: any = { ...settings };
 
-      // Ne pas écraser le mot de passe qBittorrent si le champ est laissé vide
-      if (!updates.qbit_password?.trim()) {
-        delete updates.qbit_password;
+      // Ne pas écraser la clé API qBittorrent si le champ est laissé vide
+      if (!updates.qbit_api_key?.trim()) {
+        delete updates.qbit_api_key;
       }
 
       if (newPassword) {
@@ -86,6 +86,9 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ user, isOp
       onUserUpdated({
         ...user,
         ...updatedUser,
+        has_qbit_api_key: settings.qbit_api_key?.trim()
+          ? true
+          : !!updatedUser?.has_qbit_api_key,
         allow_force_interactive_download: !!updatedUser?.allow_force_interactive_download,
       });
 
@@ -93,7 +96,6 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ user, isOp
         useAuthStore.getState().patchUser({
           allow_force_interactive_download: !!updatedUser?.allow_force_interactive_download,
           qbit_url: updatedUser.qbit_url,
-          qbit_username: updatedUser.qbit_username,
         });
       }
       
@@ -171,7 +173,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ user, isOp
                 <div className="space-y-6 animate-in fade-in duration-300">
                   <div className="p-4 bg-blue-600/5 border border-blue-500/10 rounded-2xl mb-6">
                     <p className="text-[10px] font-bold text-blue-400 leading-relaxed uppercase">
-                      Configuration qBittorrent spécifique à l'utilisateur.
+                      Configuration qBittorrent 5.2+ via clé API (qbt_...).
                     </p>
                   </div>
 
@@ -184,36 +186,27 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ user, isOp
                         value={settings.qbit_url} 
                         onChange={(e) => setSettings({ ...settings, qbit_url: e.target.value })} 
                         className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-5 py-4 text-white text-xs font-black tracking-widest focus:ring-2 focus:ring-blue-500/40 transition-all" 
-                        placeholder="http://192.168.1.50:8080" 
+                        placeholder="http://qbittorrent:8080" 
                       />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Utilisateur</label>
-                      <div className="relative">
-                        <User size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600" />
-                        <input 
-                          type="text" 
-                          value={settings.qbit_username} 
-                          onChange={(e) => setSettings({ ...settings, qbit_username: e.target.value })} 
-                          className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-5 py-4 text-white text-xs font-black tracking-widest focus:ring-2 focus:ring-blue-500/40 transition-all" 
-                        />
-                      </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Clé API qBittorrent</label>
+                      {user.has_qbit_api_key && !settings.qbit_api_key && (
+                        <span className="text-[8px] font-black uppercase tracking-widest text-green-400">Configurée</span>
+                      )}
                     </div>
-                    <div className="space-y-2">
-                      <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Mot de passe</label>
-                      <div className="relative">
-                        <Lock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600" />
-                        <input 
-                          type="password" 
-                          value={settings.qbit_password} 
-                          onChange={(e) => setSettings({ ...settings, qbit_password: e.target.value })} 
-                          placeholder="Laisser vide pour conserver l'actuel"
-                          className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-5 py-4 text-white focus:ring-2 focus:ring-blue-500/40 transition-all placeholder:text-gray-600 placeholder:font-bold placeholder:text-[9px]" 
-                        />
-                      </div>
+                    <div className="relative">
+                      <Key size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600" />
+                      <input 
+                        type="password" 
+                        value={settings.qbit_api_key} 
+                        onChange={(e) => setSettings({ ...settings, qbit_api_key: e.target.value })} 
+                        placeholder="qbt_... (laisser vide pour conserver l'actuelle)"
+                        className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-5 py-4 text-white focus:ring-2 focus:ring-blue-500/40 transition-all placeholder:text-gray-600 placeholder:font-bold placeholder:text-[9px]" 
+                      />
                     </div>
                   </div>
 
@@ -288,6 +281,23 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ user, isOp
                         className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-5 py-4 text-white text-xs font-black tracking-widest focus:ring-2 focus:ring-pink-500/40 transition-all" 
                       />
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Chemin Racine Animation</label>
+                    <div className="relative">
+                      <Folder size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600" />
+                      <input
+                        type="text"
+                        value={settings.download_path_animation}
+                        onChange={(e) => setSettings({ ...settings, download_path_animation: e.target.value })}
+                        placeholder="ex: /media/user/Animation"
+                        className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-5 py-4 text-white text-xs font-black tracking-widest focus:ring-2 focus:ring-violet-500/40 transition-all"
+                      />
+                    </div>
+                    <p className="text-[9px] text-gray-600 font-bold uppercase tracking-widest ml-1">
+                      Films animés (séparé des séries Anime)
+                    </p>
                   </div>
                 </div>
               )}
