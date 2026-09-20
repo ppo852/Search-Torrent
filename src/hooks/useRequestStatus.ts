@@ -2,7 +2,6 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../stores/authStore';
 import type { PosterBadge } from '../lib/poster-badge';
-import { normalizeTitleForMatch } from '../lib/normalize-title';
 
 export interface MovieRequestStatus {
   tmdb_id: number;
@@ -84,22 +83,16 @@ export function useRequestStatus() {
 
   const inventoryIndex = useMemo(() => {
     const moviesById = new Set<number>();
-    const moviesByTitle = new Set<string>();
-    const tvByTitle = new Set<string>();
+    const tvById = new Set<number>();
 
     for (const row of query.data?.inventory || []) {
       const id = toTmdbId(row.tmdb_id);
-      const title = row.title_normalized ? String(row.title_normalized).trim() : '';
-      if (row.media_kind === 'movie') {
-        if (id) moviesById.add(id);
-        if (title) moviesByTitle.add(title);
-      }
-      if (row.media_kind === 'tv' && title) {
-        tvByTitle.add(title);
-      }
+      if (!id) continue;
+      if (row.media_kind === 'movie') moviesById.add(id);
+      if (row.media_kind === 'tv') tvById.add(id);
     }
 
-    return { moviesById, moviesByTitle, tvByTitle };
+    return { moviesById, tvById };
   }, [query.data?.inventory]);
 
   const tvPresenceById = useMemo(() => {
@@ -113,22 +106,17 @@ export function useRequestStatus() {
 
   const getPosterBadges = (
     tmdbId: number | string,
-    type: 'movie' | 'tv',
-    isAnime = false,
-    title?: string | null
+    type: 'movie' | 'tv'
   ): PosterBadge[] => {
     const data = query.data;
     if (!data) return [];
 
     const badges: PosterBadge[] = [];
     const id = toTmdbId(tmdbId);
-    const titleNorm = title ? normalizeTitleForMatch(title) : '';
+    if (!id) return badges;
 
     if (type === 'movie') {
-      const inLibrary =
-        (id && inventoryIndex.moviesById.has(id)) ||
-        (titleNorm && inventoryIndex.moviesByTitle.has(titleNorm));
-      if (inLibrary) {
+      if (inventoryIndex.moviesById.has(id)) {
         badges.push({ type: 'in_library', label: 'En bibliothèque' });
       }
 
@@ -144,8 +132,7 @@ export function useRequestStatus() {
       return badges;
     }
 
-    const mediaTypes = isAnime ? ['anime', 'tv'] : ['tv', 'anime'];
-    const tvPresence = id ? tvPresenceById.get(id) : null;
+    const tvPresence = tvPresenceById.get(id);
 
     if (tvPresence && tvPresence.present_episodes > 0) {
       if (tvPresence.series_ended && tvPresence.complete) {
@@ -153,12 +140,14 @@ export function useRequestStatus() {
       } else {
         badges.push({ type: 'series_partial', label: 'Partiel' });
       }
-    } else if (titleNorm && inventoryIndex.tvByTitle.has(titleNorm)) {
+    } else if (inventoryIndex.tvById.has(id)) {
       badges.push({ type: 'series_partial', label: 'Partiel' });
     }
 
     const hasSeasonRequest = data.seasons.some(
-      (s) => toTmdbId(s.tmdb_id) === id && mediaTypes.includes(s.media_type)
+      (s) =>
+        toTmdbId(s.tmdb_id) === id &&
+        (s.media_type === 'tv' || s.media_type === 'anime')
     );
     if (hasSeasonRequest) {
       badges.push(REQUESTED_BADGE);
@@ -167,8 +156,14 @@ export function useRequestStatus() {
     return badges;
   };
 
+  const getPosterBadgesForMedia = (media: {
+    id: number | string;
+    type: 'movie' | 'tv';
+  }): PosterBadge[] => getPosterBadges(media.id, media.type);
+
   return {
     ...query,
     getPosterBadges,
+    getPosterBadgesForMedia,
   };
 }

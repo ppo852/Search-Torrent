@@ -8,7 +8,17 @@ import {
   pad2
 } from '../utils/helpers.js';
 import { applyQualityProfile } from '../utils/validation.js';
+import { isEpisodeTorrentTitle } from '../utils/episode-title.js';
+import {
+  isMovieExtraTorrent,
+  shouldApplyMovieExtraFilter,
+  expandTitleVariantsForRelevance,
+} from '../utils/extra-content.js';
 import logger from '../core/logger.js';
+import {
+  buildProwlarrTvSearchQuery,
+  buildProwlarrMovieSearchQuery,
+} from './id-query.js';
 
 /**
  * Sépare titre / année sans vider un titre numérique (ex. "1923", "9101").
@@ -78,20 +88,21 @@ export function getProwlarrCategoryId(mediaType) {
 }
 
 /**
- * Internal helper to fetch title variants from TMDB
+ * Variantes de titre TMDB pour le filtre de pertinence.
  */
 async function fetchVariants(tmdbId, type) {
-  if (!tmdbId) return { variants: [], originalTitle: null };
+  if (!tmdbId) return { variants: [], originalTitle: null, isDocumentary: false };
   const info = await tmdbService.getDetailedInfo(tmdbId, type);
-  if (!info) return { variants: [], originalTitle: null };
+  if (!info) return { variants: [], originalTitle: null, isDocumentary: false };
   return {
-    variants: info.titles,
-    originalTitle: info.originalTitle || info.mainTitle
+    variants: info.titles || [],
+    originalTitle: info.originalTitle || info.mainTitle,
+    isDocumentary: !!info.isDocumentary,
   };
 }
 
 /**
- * LOGIQUE DE FILTRAGE STRICTE (COPIE CONFORME DE LA TIENNE)
+ * Correspondance stricte titre demandé ↔ nom de torrent.
  */
 function checkSingleTitleStrict(n, requestedTitle) {
   const t = normalize(requestedTitle).replace(/\s+/g, ' ');
@@ -186,25 +197,36 @@ export function isRelevantResult(torrentName, requestedTitles, year, seasonNumbe
 }
 
 /**
- * Prepare queries
+ * Variantes texte (max 2) : original d'abord, puis titre local.
+ * Priorité : saison → année → titre seul.
  */
 function prepareQueries(baseTitle, originalTitle, year, seasonNumber) {
-  const q = new Set();
+  const ordered = [];
+  const seen = new Set();
+  const push = (query) => {
+    const q = String(query || '').trim();
+    if (!q || seen.has(q)) return;
+    seen.add(q);
+    ordered.push(q);
+  };
+
+  const st = baseTitle ? simplifyTitle(baseTitle) : '';
+  const ost =
+    originalTitle && originalTitle !== baseTitle ? simplifyTitle(originalTitle) : '';
+  const titles = [ost, st].filter(Boolean);
   const sToken = seasonNumber ? `S${pad2(seasonNumber)}` : null;
 
-  if (baseTitle) {
-    const st = simplifyTitle(baseTitle);
-    q.add(st);
-    if (sToken) q.add(`${st} ${sToken}`);
-    if (year) q.add(`${st} ${year}`);
+  for (const t of titles) {
+    if (sToken) push(`${t} ${sToken}`);
   }
-  if (originalTitle && originalTitle !== baseTitle) {
-    const ost = simplifyTitle(originalTitle);
-    q.add(ost);
-    if (sToken) q.add(`${ost} ${sToken}`);
-    if (year) q.add(`${ost} ${year}`);
+  for (const t of titles) {
+    if (year) push(`${t} ${year}`);
   }
-  return Array.from(q);
+  for (const t of titles) {
+    push(t);
+  }
+
+  return ordered.slice(0, 2);
 }
 
 /**
@@ -252,7 +274,9 @@ export function processSearchResults(rawResults, options = {}) {
     filterByRelevance = true,
     multiplier = 1,
     sortBy = 'seeds_desc',
-    seasonNumber = null
+    seasonNumber = null,
+    filterMovieExtras = false,
+    movieTitleVariants = [],
   } = options;
 
   const relevanceTitles = validTitles || (baseTitle ? [baseTitle] : []);
@@ -288,6 +312,13 @@ export function processSearchResults(rawResults, options = {}) {
   if (minSeeds > 0) results = results.filter(r => r.seeds >= minSeeds);
   if (filterByRelevance) results = results.filter(r => isRelevantResult(r.name, relevanceTitles, year, seasonNumber));
 
+  let extrasFilteredOnly = false;
+  if (filterMovieExtras) {
+    const beforeExtras = results.length;
+    results = results.filter((r) => !isMovieExtraTorrent(r.name, { titleVariants: movieTitleVariants }));
+    extrasFilteredOnly = beforeExtras > 0 && results.length === 0;
+  }
+
   // Application du profil de qualité (avec multiplicateur si saison complète)
   if (qualityProfile) {
     results = applyQualityProfile(results, qualityProfile, multiplier);
@@ -306,22 +337,22 @@ export function processSearchResults(rawResults, options = {}) {
     return (b.seeds || 0) - (a.seeds || 0);
   });
 
-  return results;
+  return { results, extrasFilteredOnly };
 }
 
-/**
- * Execute search (TEXT ONLY)
- */
-async function runSearch(query, categoryId) {
+async function runProwlarrSearch(query, categoryId, searchType = 'search') {
   const prowlarrUrl = await getSetting('prowlarr_url');
   const prowlarrApiKey = await getSetting('prowlarr_api_key');
   if (!prowlarrUrl || !prowlarrApiKey) return [];
 
   const url = new URL('/api/v1/search', prowlarrUrl);
   url.searchParams.append('query', query);
+  if (searchType && searchType !== 'search') {
+    url.searchParams.append('type', searchType);
+  }
 
   if (categoryId) {
-    String(categoryId).split(',').forEach(id => {
+    String(categoryId).split(',').forEach((id) => {
       url.searchParams.append('categories', id.trim());
     });
   }
@@ -330,72 +361,293 @@ async function runSearch(query, categoryId) {
     const response = await fetch(url, { headers: { 'X-Api-Key': prowlarrApiKey } });
     if (!response.ok) return [];
     return await response.json();
-  } catch (e) {
+  } catch {
     return [];
   }
 }
 
-export async function searchMovie({ title, year, tmdbId, minSeeds = 3, filterByRelevance = true, qualityProfile = null }) {
-  const { variants, originalTitle } = await fetchVariants(tmdbId, 'movie');
-  const finalVariants = variants.length > 0 ? variants : [title];
+function resolveMovieMediaType(mediaType) {
+  return mediaType === 'animation' ? 'animation' : 'movie';
+}
+
+/**
+ * Recherche Prowlarr par ID (Sonarr/Radarr). Texte = fallback / expand côté appelant.
+ * @param {'tv'|'movie'} kind
+ */
+async function runIndexerIdSearch({
+  kind,
+  tmdbId,
+  mediaType,
+  seasonNumber,
+  episodeNumber,
+} = {}) {
+  const isTv = kind === 'tv';
+  const label = isTv ? 'TV' : 'Movie';
+  const tmdbType = isTv ? 'tv' : resolveMovieMediaType(mediaType);
+  const externalIds = tmdbId ? await tmdbService.getExternalIds(tmdbId, tmdbType) : null;
+
+  let idQuery = '';
+  if (isTv) {
+    idQuery = buildProwlarrTvSearchQuery({
+      tvdbId: externalIds?.tvdbId,
+      tmdbId: externalIds?.tmdbId ?? tmdbId,
+      imdbId: externalIds?.imdbId,
+      seasonNumber,
+      episodeNumber,
+    });
+  } else {
+    idQuery = buildProwlarrMovieSearchQuery({
+      tmdbId: externalIds?.tmdbId ?? tmdbId,
+      imdbId: externalIds?.imdbId,
+    });
+  }
+
+  if (!idQuery) {
+    return [];
+  }
+
+  const categoryId = getProwlarrCategoryId(isTv ? mediaType : tmdbType);
+  // Prowlarr attend type=movie (pas moviesearch) pour parser {TmdbId}/{ImdbId}.
+  // Sinon les IDs partent en requête littérale et font planter les indexeurs.
+  const searchType = isTv ? 'tvsearch' : 'movie';
+  const raw = await runProwlarrSearch(idQuery, categoryId, searchType);
+
+  if (raw.length > 0) {
+    logger.debug('prowlarr', `${label} ID search "${idQuery}" → ${raw.length} résultat(s)`);
+  } else {
+    logger.debug('prowlarr', `${label} ID search vide ("${idQuery}")`);
+  }
+
+  return raw;
+}
+
+/** Fusion ID + texte — le dédoublonnage est fait dans processSearchResults. */
+function mergeProwlarrRawResults(...lists) {
+  const out = [];
+  for (const list of lists) {
+    for (const item of list || []) {
+      out.push(item);
+    }
+  }
+  return out;
+}
+
+/** Texte séquentiel (pas de Promise.all) pour ménager les indexeurs. */
+async function runTextQueries(queries, categoryId) {
+  const out = [];
+  for (const q of (queries || []).filter(Boolean)) {
+    const batch = await runProwlarrSearch(q, categoryId, 'search');
+    out.push(...(batch || []));
+  }
+  return out;
+}
+
+/**
+ * ID d'abord ; texte séquentiel si besoin (arrêt dès résultats filtrés).
+ * expandTextSearch : ID + toutes les variantes texte (max 2), sans arrêt anticipé.
+ */
+async function processWithIdTitleFallback({
+  idRaw,
+  textQueries,
+  categoryId,
+  expandTextSearch = false,
+  preFilter = null,
+  processOptions,
+}) {
+  const applyPre = (raw) =>
+    (typeof preFilter === 'function' ? preFilter(raw || []) : (raw || []));
+
+  if (expandTextSearch) {
+    const textRaw = await runTextQueries(textQueries, categoryId);
+    let raw = mergeProwlarrRawResults(idRaw, textRaw);
+    raw = applyPre(raw);
+    return processSearchResults(raw, processOptions);
+  }
+
+  let processed = processSearchResults(applyPre(idRaw), processOptions);
+  if (processed.results.length > 0) {
+    return processed;
+  }
+
+  const queries = (textQueries || []).filter(Boolean);
+  let textAccum = [];
+  for (const q of queries) {
+    const batch = await runProwlarrSearch(q, categoryId, 'search');
+    textAccum.push(...(batch || []));
+    processed = processSearchResults(applyPre(textAccum), processOptions);
+    if (processed.results.length > 0) {
+      if ((idRaw || []).length > 0) {
+        logger.debug('prowlarr', 'ID sans résultat pertinent après filtre, fallback texte');
+      }
+      return processed;
+    }
+  }
+
+  return processed;
+}
+
+export async function searchMovieDetailed({
+  title,
+  year,
+  tmdbId,
+  mediaType = 'movie',
+  minSeeds = 0,
+  qualityProfile = null,
+  expandTextSearch = false,
+}) {
+  const tmdbType = resolveMovieMediaType(mediaType);
+  const { variants, originalTitle, isDocumentary } = await fetchVariants(tmdbId, 'movie');
+  // Une seule liste : pertinence + filtre making-of / bonus.
+  const titleVariants = [
+    ...new Set(
+      [title, originalTitle, ...(variants.length > 0 ? variants : [title])].filter(Boolean)
+    ),
+  ];
+  const filterMovieExtras = shouldApplyMovieExtraFilter({
+    isDocumentary,
+    titleVariants,
+  });
+  // Making-of / docu : variantes « cœur » pour matcher Title.Making.Of / Title.DOC
+  const relevanceTitles = expandTitleVariantsForRelevance(titleVariants, { isDocumentary });
+
+  const idRaw = await runIndexerIdSearch({
+    kind: 'movie',
+    tmdbId,
+    mediaType: tmdbType,
+  });
+
   const queries = prepareQueries(title, originalTitle || title, year);
-
-  const results = await Promise.all(queries.map(q => runSearch(q, getProwlarrCategoryId('movie'))));
-  return processSearchResults(results.flat(), { baseTitle: title, validTitles: finalVariants, year, minSeeds, qualityProfile, filterByRelevance, sortBy: qualityProfile?.sort_by });
+  return processWithIdTitleFallback({
+    idRaw,
+    textQueries: queries,
+    categoryId: getProwlarrCategoryId(tmdbType),
+    expandTextSearch,
+    processOptions: {
+      baseTitle: title,
+      validTitles: relevanceTitles,
+      year,
+      minSeeds,
+      qualityProfile,
+      filterByRelevance: true,
+      sortBy: qualityProfile?.sort_by,
+      filterMovieExtras,
+      movieTitleVariants: titleVariants,
+    },
+  });
 }
 
-export async function searchTvSeries({ title, year, tmdbId, mediaType = 'tv', seasonNumber, minSeeds = 3, qualityProfile = null, episodeCount = 1 }) {
+export async function searchMovie(options) {
+  const { results } = await searchMovieDetailed(options);
+  return results;
+}
+
+export async function searchTvSeries({
+  title,
+  year,
+  tmdbId,
+  mediaType = 'tv',
+  seasonNumber,
+  minSeeds = 0,
+  qualityProfile = null,
+  episodeCount = 1,
+  expandTextSearch = false,
+}) {
   const { variants, originalTitle } = await fetchVariants(tmdbId, 'tv');
   const finalVariants = variants.length > 0 ? variants : [title];
+
+  const idRaw = await runIndexerIdSearch({
+    kind: 'tv',
+    tmdbId,
+    seasonNumber,
+    mediaType,
+  });
+
   const queries = prepareQueries(title, originalTitle || title, year, seasonNumber);
-
-  const results = await Promise.all(queries.map(q => runSearch(q, getProwlarrCategoryId(mediaType))));
-  return processSearchResults(results.flat(), {
-    baseTitle: title,
-    validTitles: finalVariants,
-    year,
-    minSeeds,
-    qualityProfile,
-    multiplier: episodeCount,
-    sortBy: qualityProfile?.sort_by,
-    seasonNumber
+  const { results } = await processWithIdTitleFallback({
+    idRaw,
+    textQueries: queries,
+    categoryId: getProwlarrCategoryId(mediaType),
+    expandTextSearch,
+    processOptions: {
+      baseTitle: title,
+      validTitles: finalVariants,
+      year,
+      minSeeds,
+      qualityProfile,
+      multiplier: episodeCount,
+      sortBy: qualityProfile?.sort_by,
+      seasonNumber,
+      filterByRelevance: true,
+    },
   });
+  return results;
 }
 
-export async function searchTvEpisode({ title, seasonNumber, episodeNumber, tmdbId, mediaType = 'tv', minSeeds = 3, qualityProfile = null }) {
+export async function searchTvEpisode({
+  title,
+  seasonNumber,
+  episodeNumber,
+  tmdbId,
+  mediaType = 'tv',
+  minSeeds = 0,
+  qualityProfile = null,
+}) {
   const { variants, originalTitle } = await fetchVariants(tmdbId, 'tv');
   const finalVariants = variants.length > 0 ? variants : [title];
-  const t = originalTitle || title;
-
   const episodeToken = `S${pad2(seasonNumber)}E${pad2(episodeNumber)}`;
-  const episodeRegex = new RegExp(`S0*${seasonNumber}E0*${episodeNumber}`, 'i');
+  const categoryId = getProwlarrCategoryId(mediaType);
 
-  const raw = await runSearch(`${t} ${episodeToken}`, getProwlarrCategoryId(mediaType));
-  const filtered = raw.filter(r => episodeRegex.test(r.title));
-
-  return processSearchResults(filtered, {
-    baseTitle: title,
-    validTitles: finalVariants,
-    minSeeds,
-    qualityProfile,
-    sortBy: qualityProfile?.sort_by,
-    seasonNumber
+  const idRaw = await runIndexerIdSearch({
+    kind: 'tv',
+    tmdbId,
+    seasonNumber,
+    episodeNumber,
+    mediaType,
   });
+
+  // Max 2 variantes texte (original puis FR), séquentiel + stop via processWithIdTitleFallback.
+  const textQueries = [];
+  const ost = originalTitle ? simplifyTitle(originalTitle) : '';
+  const st = title ? simplifyTitle(title) : '';
+  if (ost) textQueries.push(`${ost} ${episodeToken}`);
+  if (st && st !== ost) textQueries.push(`${st} ${episodeToken}`);
+  if (textQueries.length === 0 && title) textQueries.push(`${title} ${episodeToken}`);
+
+  // Auto-search : jamais d'expand (évite homonymes). ID → texte si besoin + filtre titre.
+  const { results } = await processWithIdTitleFallback({
+    idRaw,
+    textQueries: textQueries.slice(0, 2),
+    categoryId,
+    expandTextSearch: false,
+    preFilter: (raw) =>
+      (raw || []).filter((r) => isEpisodeTorrentTitle(r.title, seasonNumber, episodeNumber)),
+    processOptions: {
+      baseTitle: title,
+      validTitles: finalVariants,
+      minSeeds,
+      qualityProfile,
+      sortBy: qualityProfile?.sort_by,
+      seasonNumber,
+      filterByRelevance: true,
+    },
+  });
+  return results;
 }
 
-export async function searchGeneral({ query, category = null, minSeeds = 3 }) {
+export async function searchGeneral({ query, category = null, minSeeds = 0 }) {
   const categoryId = category ? getProwlarrCategoryId(category) : null;
-  const raw = await runSearch(query, categoryId);
+  const raw = await runProwlarrSearch(query, categoryId, 'search');
   const filterByRelevance = !NON_MEDIA_SEARCH_CATEGORIES.has(category);
-  return processSearchResults(raw, { baseTitle: query, minSeeds, filterByRelevance });
+  return processSearchResults(raw, { baseTitle: query, minSeeds, filterByRelevance }).results;
 }
 
 export default {
   searchMovie,
+  searchMovieDetailed,
   searchTvSeries,
   searchTvEpisode,
   searchGeneral,
   isRelevantResult,
   getProwlarrCategoryId,
-  isCompleteSeasonTitle
+  isCompleteSeasonTitle,
 };

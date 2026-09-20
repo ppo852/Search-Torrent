@@ -27,6 +27,7 @@ import prowlarrRoutes from '../../routes/prowlarr/index.js';
 import systemRoutes from '../../routes/system/index.js';
 import adminRoutes from '../../routes/admin/index.js';
 import embyRoutes from '../../routes/emby/index.js';
+import calendarRoutes from '../../routes/calendar/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -88,6 +89,8 @@ export function configureServer() {
   app.use('/api/system', systemRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/emby', embyRoutes);
+  // Calendrier iCal Organizr : /api/calendar.ics et /api/calendar
+  app.use('/api', calendarRoutes);
   
   // Route de compatibilité pour maintenir l'ancien endpoint de login
   app.post('/api/login', (req, res) => {

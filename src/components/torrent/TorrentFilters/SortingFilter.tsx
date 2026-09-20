@@ -1,5 +1,6 @@
 import React from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
+import { FilterSelect } from '../../ui/FilterSelect';
 import { SortField } from '../../../types/qbittorrent';
 
 interface SortingFilterProps {
@@ -15,7 +16,7 @@ export const SortingFilter: React.FC<SortingFilterProps> = ({
   sortDirection,
   onSortChange,
   onDirectionChange,
-  className = ''
+  className = '',
 }) => {
   const sortOptions = [
     { value: 'name', label: 'Nom' },
@@ -25,28 +26,25 @@ export const SortingFilter: React.FC<SortingFilterProps> = ({
     { value: 'upspeed', label: 'Vitesse UP' },
     { value: 'eta', label: 'Temps restant' },
     { value: 'ratio', label: 'Ratio' },
-    { value: 'added_on', label: 'Date d\'ajout' },
-    { value: 'tracker', label: 'Indexeur (Tracker)' }
+    { value: 'added_on', label: "Date d'ajout" },
+    { value: 'tracker', label: 'Indexeur (Tracker)' },
   ];
 
   return (
-    <div className={`relative ${className}`}>
-      <div className="flex">
-        <select
-          value={currentSortField}
-          onChange={(e) => onSortChange(e.target.value as SortField)}
-          className="w-full appearance-none pl-10 pr-10 py-2 bg-gray-800 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-        >
-          {sortOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        
+    <FilterSelect
+      className={className}
+      value={currentSortField}
+      onChange={(v) => onSortChange(v as SortField)}
+      options={sortOptions}
+      icon={<ArrowUpDown className="h-4 w-4" />}
+      endAdornment={
         <button
-          onClick={onDirectionChange}
-          className="absolute right-2 top-0 h-full flex items-center text-gray-400 hover:text-white"
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDirectionChange();
+          }}
+          className="p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-blue-600/20 transition-colors"
           title={sortDirection === 'asc' ? 'Tri croissant' : 'Tri décroissant'}
         >
           {sortDirection === 'asc' ? (
@@ -55,11 +53,7 @@ export const SortingFilter: React.FC<SortingFilterProps> = ({
             <ArrowDown className="h-4 w-4" />
           )}
         </button>
-      </div>
-      
-      <div className="absolute left-3 top-0 h-full flex items-center text-gray-400">
-        <ArrowUpDown className="h-4 w-4" />
-      </div>
-    </div>
+      }
+    />
   );
 };

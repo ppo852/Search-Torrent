@@ -16,6 +16,7 @@ function parseSeasonEpisodes(data) {
     .map((e) => ({
       episodeNumber: Number(e?.episode_number),
       airDate: e?.air_date || null,
+      title: typeof e?.name === 'string' ? e.name : null,
     }))
     .filter((e) => Number.isInteger(e.episodeNumber) && e.episodeNumber > 0)
     .sort((a, b) => a.episodeNumber - b.episodeNumber);

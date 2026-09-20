@@ -3,7 +3,6 @@
  * Exportés de manière centralisée pour faciliter les imports
  */
 
-export { Header } from './Header';
 export { Layout } from './Layout';
 export { Toast } from './Toast';
 export { ToastHost } from './ToastHost';

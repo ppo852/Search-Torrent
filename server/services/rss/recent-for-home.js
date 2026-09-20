@@ -4,10 +4,9 @@ import { getSetting } from '../settings/index.js';
 import { getAppCache, setAppCache } from '../core/app-cache.js';
 import { fetchRSSFeedWithCache } from './index.js';
 import { getTvShowDetails } from './tmdb.js';
-import mediaInventoryService from '../media-inventory/index.js';
-import { ensureEmbySchema } from '../emby/store.js';
+import { RSS_HOME_HOURS } from '../../../shared/rss-home-hours.js';
 
-const DEFAULT_HOURS = 72;
+const DEFAULT_HOURS = RSS_HOME_HOURS;
 const HOME_CACHE_TTL_MINUTES = 15;
 const ACTIVE_SHOW_MONTHS = 18;
 const ACTIVE_STATUSES = new Set(['Returning Series', 'In Production', 'Planned']);
@@ -26,15 +25,9 @@ function getReleaseYear(releaseDate) {
   return Number.isFinite(year) ? year : null;
 }
 
-function isMovieInYearWindow(releaseDate) {
-  const year = getReleaseYear(releaseDate);
-  if (!year) return false;
-  const currentYear = new Date().getFullYear();
-  return year === currentYear || year === currentYear - 1;
-}
-
-function isFirstAirRecent(firstAirDate) {
-  const year = getReleaseYear(firstAirDate);
+/** Année calendaire = année courante ou N−1 (films release_date / séries first_air_date). */
+function isYearCurrentOrPrevious(dateStr) {
+  const year = getReleaseYear(dateStr);
   if (!year) return false;
   const currentYear = new Date().getFullYear();
   return year === currentYear || year === currentYear - 1;
@@ -78,7 +71,7 @@ function isRecentMovieForHome(item, hours) {
   if (!item.tmdb) return false;
   if (item.tmdb.media_type !== 'movie') return false;
   if (!hasPoster(item.tmdb)) return false;
-  if (!isMovieInYearWindow(item.tmdb.release_date)) return false;
+  if (!isYearCurrentOrPrevious(item.tmdb.release_date)) return false;
   return true;
 }
 
@@ -101,7 +94,7 @@ function isInterestingTvShow(show) {
     return false;
   }
 
-  if (isFirstAirRecent(firstAir)) return true;
+  if (isYearCurrentOrPrevious(firstAir)) return true;
   if (ACTIVE_STATUSES.has(status)) return true;
   if (isWithinMonths(lastAir, ACTIVE_SHOW_MONTHS)) return true;
 
@@ -138,21 +131,6 @@ function toHomeMediaDto(item) {
       vote_average: tmdb.vote_average,
     },
   };
-}
-
-async function getOwnedMovieTmdbIds() {
-  await mediaInventoryService.ensureSchema();
-  await ensureEmbySchema();
-  const rows = await db.query(
-    `SELECT DISTINCT tmdb_id FROM (
-       SELECT tmdb_id FROM local_media_inventory
-       WHERE media_kind = 'movie' AND tmdb_id IS NOT NULL AND tmdb_id > 0
-       UNION
-       SELECT tmdb_id FROM emby_media_inventory
-       WHERE media_kind = 'movie' AND tmdb_id IS NOT NULL AND tmdb_id > 0
-     )`
-  );
-  return new Set((rows || []).map((row) => row.tmdb_id));
 }
 
 async function collectRssItems() {
@@ -219,35 +197,44 @@ async function filterInterestingTvItems(items, token, sharedCache = new Map()) {
  * Agrège les médias récents des trackers pour la page d'accueil.
  */
 export async function getRecentForHome({ hours = DEFAULT_HOURS } = {}) {
-  const cacheKey = `recent-home:v2:${hours}`;
+  const cacheKey = `recent-home:v4:${hours}`;
   const cached = await getAppCache(cacheKey);
   if (cached) {
     return cached;
   }
 
   const allItems = await collectRssItems();
+  const tmdbToken = await getSetting('tmdb_access_token');
+  const tmdbConfigured = Boolean(tmdbToken && String(tmdbToken).trim());
+
+  if (!tmdbConfigured) {
+    console.warn('[rss/recent-home] tmdb_access_token absent — séries/anime home non enrichis');
+  }
+
   if (!allItems.length) {
-    const empty = { films: [], animations: [], series: [], anime: [], hours };
+    const empty = {
+      films: [],
+      animations: [],
+      series: [],
+      anime: [],
+      hours,
+      tmdbConfigured,
+    };
     await setAppCache(cacheKey, empty, HOME_CACHE_TTL_MINUTES);
     return empty;
   }
-
-  const ownedMovieIds = await getOwnedMovieTmdbIds();
-  const tmdbToken = await getSetting('tmdb_access_token');
 
   const recentMovies = allItems.filter((item) => isRecentMovieForHome(item, hours));
 
   const films = dedupeByTmdbId(
     recentMovies.filter((item) => !isAnimationMovieItem(item))
   )
-    .filter((item) => !ownedMovieIds.has(item.tmdb.tmdb_id))
     .sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate))
     .map(toHomeMediaDto);
 
   const animations = dedupeByTmdbId(
     recentMovies.filter((item) => isAnimationMovieItem(item))
   )
-    .filter((item) => !ownedMovieIds.has(item.tmdb.tmdb_id))
     .sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate))
     .map(toHomeMediaDto);
 
@@ -262,7 +249,7 @@ export async function getRecentForHome({ hours = DEFAULT_HOURS } = {}) {
   let series = [];
   let anime = [];
 
-  if (tmdbToken) {
+  if (tmdbConfigured) {
     const tvShowCache = new Map();
     const [filteredSeries, filteredAnime] = await Promise.all([
       filterInterestingTvItems(seriesCandidates, tmdbToken, tvShowCache),
@@ -278,7 +265,7 @@ export async function getRecentForHome({ hours = DEFAULT_HOURS } = {}) {
       .map(toHomeMediaDto);
   }
 
-  const result = { films, animations, series, anime, hours };
+  const result = { films, animations, series, anime, hours, tmdbConfigured };
   await setAppCache(cacheKey, result, HOME_CACHE_TTL_MINUTES);
   return result;
 }

@@ -10,10 +10,10 @@ import { EmptyState } from '../components/ui/EmptyState';
 import type { SearchResult, SortOption, CategoryType } from '../types';
 import { tmdbAPI } from '../services/tmdb/tmdb';
 import { globalSettings } from '../services/settings';
-import { Search, Rss, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Search, ChevronRight, ChevronLeft } from 'lucide-react';
 import { useInteractiveTorrentDownload } from '../hooks/useInteractiveTorrentDownload';
 import { useRequestStatus } from '../hooks/useRequestStatus';
-import { filterTmdbBySearchCategory, hasTmdbAnimationGenre } from '../lib/tmdb-category-filter';
+import { filterTmdbBySearchCategory } from '../lib/tmdb-category-filter';
 
 export function NewTorrentPage() {
   const [sortOption, setSortOption] = useState<SortOption>('size');
@@ -21,7 +21,7 @@ export function NewTorrentPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 25;
   const { results, isLoading, error, lastSearchCategory, tmdbResults, setResults, setIsLoading, setError, setLastSearchCategory, setTmdbResults, setLastSearchQuery } = useSearchStore();
-  const { getPosterBadges } = useRequestStatus();
+  const { getPosterBadgesForMedia } = useRequestStatus();
 
   const { download, confirmModal } = useInteractiveTorrentDownload();
 
@@ -96,7 +96,6 @@ export function NewTorrentPage() {
       if (sortOption === 'name') cmp = a.name.localeCompare(b.name);
       else if (sortOption === 'size') cmp = a.size - b.size;
       else if (sortOption === 'seeds') cmp = a.seeds - b.seeds;
-      else if (sortOption === 'leech') cmp = a.leech - b.leech;
       else {
         const dA = a.publishDate ? new Date(a.publishDate).getTime() : 0;
         const dB = b.publishDate ? new Date(b.publishDate).getTime() : 0;
@@ -113,8 +112,9 @@ export function NewTorrentPage() {
 
   return (
     <div className="animate-premium-fade space-y-12 pb-20">
-      <div className="glass-card p-6 border-white/5 shadow-2xl sticky top-4 z-40 backdrop-blur-3xl bg-gray-950/60">
+      <div className="sticky top-4 z-40 space-y-6">
         <SearchBar onSearch={handleSearch} />
+        <div className="h-px w-full bg-gradient-to-r from-transparent via-blue-500/30 to-transparent" />
       </div>
 
       {isLoading ? (
@@ -138,12 +138,7 @@ export function NewTorrentPage() {
             <MediaGrid
               items={tmdbResults}
               category={lastSearchCategory}
-              getPosterBadges={(item) => {
-                const isAnime =
-                  item.type === 'tv' &&
-                  (lastSearchCategory === 'anime' || hasTmdbAnimationGenre(item));
-                return getPosterBadges(item.id, item.type, isAnime, item.title);
-              }}
+              getPosterBadges={getPosterBadgesForMedia}
             />
           </div>
         ) : lastSearchCategory && (
@@ -155,10 +150,15 @@ export function NewTorrentPage() {
         )
       ) : results.length > 0 ? (
         <div className="space-y-8">
-          <div className="flex flex-col md:flex-row justify-between items-center gap-6 border-b border-white/5 pb-8">
-            <div className="flex items-center gap-4">
-               <div className="p-3 bg-blue-600/10 rounded-2xl text-blue-500"><Search size={24} /></div>
-               <div><h2 className="text-xl font-black text-white tracking-tighter uppercase mb-1">Indexation Directe</h2><p className="text-gray-500 text-[9px] font-black uppercase tracking-widest">{results.length} Identifiés</p></div>
+          <div className="flex flex-col md:flex-row justify-between items-center gap-6 pb-2">
+            <div className="flex items-center gap-3">
+              <span className="px-2.5 py-1 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[10px] font-black uppercase tracking-widest">
+                Recherche
+              </span>
+              <div>
+                <h2 className="text-lg md:text-xl font-bold text-white">Indexation directe</h2>
+                <p className="text-xs text-gray-500 mt-0.5">{results.length} identifiés</p>
+              </div>
             </div>
             <SortControls sortOption={sortOption} sortDirection={sortDirection} onSort={(o) => { if (o === sortOption) setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc'); else { setSortOption(o); setSortDirection('desc'); } }} />
           </div>
@@ -190,9 +190,14 @@ export function NewTorrentPage() {
         </div>
       ) : !lastSearchCategory ? (
         <div className="mt-20 space-y-10">
-          <div className="flex items-center gap-6">
-            <div className="p-4 bg-orange-600/10 rounded-2xl border border-orange-600/20 text-orange-500"><Rss size={24} /></div>
-            <div><h2 className="text-xl font-black text-white tracking-tighter uppercase mb-1">Réseaux RSS</h2><p className="text-gray-500 text-[9px] font-black uppercase tracking-widest">Flux temps-réel</p></div>
+          <div className="flex items-center gap-3">
+            <span className="px-2.5 py-1 rounded-lg bg-orange-500/15 border border-orange-500/30 text-orange-300 text-[10px] font-black uppercase tracking-widest">
+              RSS
+            </span>
+            <div>
+              <h2 className="text-lg md:text-xl font-bold text-white">Réseaux RSS</h2>
+              <p className="text-xs text-gray-500 mt-0.5">Flux temps-réel</p>
+            </div>
           </div>
           <RssFeedList />
         </div>

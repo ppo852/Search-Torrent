@@ -5,20 +5,22 @@
 Interface web moderne pour rechercher, suivre et télécharger vos médias via **Prowlarr** et **qBittorrent**.
 
 [![Docker Hub](https://img.shields.io/badge/Docker-ppo852%2Fsearch--torrent-blue?logo=docker)](https://hub.docker.com/r/ppo852/search-torrent)
-![Version](https://img.shields.io/badge/version-1.6.9-blue)
+![Version](https://img.shields.io/badge/version-1.7.8-blue)
 
 ## Fonctionnalités
 
-- **Accueil immersif** — Tendances TMDB, flux RSS récents, navigation rapide
+- **Accueil immersif** — Tendances TMDB, flux RSS récents (« À télécharger »), navigation rapide
 - **Recherche multi-catégories** — Films, Animation, séries, anime via TMDB ; musique, logiciels/jeux et livres en recherche directe Prowlarr
 - **Demandes & suivi** — Films / Animation / séries / anime, saisons, épisodes, auto-search intelligent
 - **Fiche média** — Filtres résultats, bande-annonce TMDB, profil qualité en recherche interactive
 - **qBittorrent intégré** — Gestion des torrents, export `.torrent`, catégories normalisées (Films, Animation, Séries, Anime, Musique, Logiciels, Jeux, Livres…)
 - **Emby** — Sync inventaire, statut dernier sync, panneau admin
 - **Flux RSS** — Cache optimisé, enrichissement TMDB, catégories détectées automatiquement
+- **Accueil & inventaire (règle)** — Catalogue TMDB **et** Trackers RSS **affichent** les médias déjà présents sur Emby / disque ; le statut se lit via les badges pochettes (`En bibliothèque` / `Partiel` / `Complète` / `Demandé`). **Ne pas** refiltrer/masquer silencieusement les films RSS déjà en inventaire.
 - **Paramètres** — Système (santé), Intégrations, Inventaire & planification, Qualité, RSS, Utilisateurs, Historique ; test & sauvegarde Prowlarr/TMDB/Emby
 - **Sécurité** — JWT, bcrypt, secrets via variables d'environnement uniquement
 - **Docker ready** — Image légère, base SQLite persistante hors image ; stack locale optionnelle (Prowlarr + qBit + Emby)
+- **SSO Organizr (optionnel)** — si déjà connecté à Organizr (sous-domaine parent + cookie), connexion Search sans mot de passe (compte Search déjà créé, même username)
 
 ## Installation Docker
 
@@ -133,6 +135,46 @@ Ces deux réglages sont le minimum pour que Search-Torrent puisse assigner une c
 - **Intégrations** — Prowlarr, qBittorrent, TMDB, Emby
 
 ## Notes de version
+
+### v1.7.8
+- **Trackers RSS (accueil)** — films déjà sur Emby/disque affichés avec badges (comme le Catalogue TMDB) ; ne pas réintroduire le filtre inventaire côté `recent-for-home`
+- **Légende badges** — Découvrir : En bibliothèque / Partiel / Complète / Demandé
+- **UI** — Demandes (« Gérer vos demandes »), titres Recherche/RSS, sidebar, pochette mobile
+
+### v1.7.7
+- **Calendrier Organizr (iCal)** — clé API admin + flux `/api/calendar.ics` (sorties séries/animes demandés en cours)
+- Fold ICS conforme UTF-8 ; titres d’épisodes TMDB dans les événements
+
+### v1.7.6
+- **Bibliothèque & demandes** — plages d’épisodes avec trous ; fallback disque si `tmdb_id` vide
+- **Anti-doublon** — Manuel (demandes) aligné sur Télécharger
+- **qBit** — catégories partagées front/serveur ; logs moins verbeux ; entrée system via `index.js`
+
+### v1.7.5
+- **qBittorrent** — réponse `pending` (ajout async d’une URL) acceptée comme succès
+
+### v1.7.4
+- **qBittorrent** — ne plus afficher un succès si la réponse JSON indique 0 torrent confirmé (`pending` / échec)
+- **Logs** — diagnostic détaillé des ajouts (`[qBit][add]`)
+
+### v1.7.3
+- **Homonymes** — badges / panneau bibliothèque : matching par ID TMDB quand l’ID est connu
+- Alignement code test → image Docker (même base que le PC de test)
+
+### v1.7.2
+- **Films / animation** — type Prowlarr `movie` (au lieu de `moviesearch`) : plus de plantage indexeurs
+- **Making-of / docu** — meilleure correspondance des releases `Title.Making.Of`
+- **UI** — bouton « Plus de résultats », filtres / mobile, tri sans « Pairs », libellés clarifiés
+
+### v1.7.1
+- **Auto-search** — filtre titre toujours actif après recherche ID (évite Pokémon / mauvais show avec le même SxxExx)
+- **What’s New** — modale centrée et adaptée mobile / tablette
+
+### v1.7.0
+- **Recherche ID** — séries (TVDB/TMDB) et films (TMDB/IMDb) via Prowlarr, comme Sonarr/Radarr ; moins d’homonymes (ex. Dark Matter 2024)
+- **Cache navigateur** — `index.html` / routes SPA en no-cache (nginx) pour voir les mises à jour sans vider le cache
+- **Demandes film** — « pas encore trouvé » n’affiche plus une alerte rouge « Problème détecté »
+- **Stabilité** — retrait de `{Year:}` en recherche ID film (évitait des erreurs indexeur / pause Prowlarr)
 
 ### v1.6.9
 - **Animation** — catégorie Films Animation (genre TMDB 16) : recherche, demandes, chemins user, qBit `Animation`, inventaire

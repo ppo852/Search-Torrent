@@ -41,3 +41,43 @@ test('splitQueryTitleAndYear — titre + année séparés', () => {
     year: '2026',
   });
 });
+
+test('isRelevantResult — rejette mauvais show avec même SxxExx (Lanterns ≠ Pokemon)', () => {
+  assert.equal(
+    isRelevantResult(
+      'Pokemon.Horizons.S01E04.FRENCH.1080p.WEB.x264-D4KiD',
+      ['Lanterns'],
+      null,
+      1
+    ),
+    false
+  );
+  assert.equal(
+    isRelevantResult('Lanterns.S01E04.1080p.WEB', ['Lanterns'], null, 1),
+    true
+  );
+});
+
+test('isRelevantResult — rejette Sailor Moon pour Toronto Section Criminelle', () => {
+  assert.equal(
+    isRelevantResult(
+      'Sailor.Moon.R.S02E09.MULTi.1080p.WEB.x264-D4KiD',
+      ['Toronto: Section Criminelle', 'Toronto Section Criminelle'],
+      null,
+      2
+    ),
+    false
+  );
+});
+
+test('isRelevantResult — rejette Ghost in the Shell pour The Rookie North', () => {
+  assert.equal(
+    isRelevantResult(
+      'The Ghost In The Shell - S01E01 - Prologue + Super Spartan I - 2160p',
+      ['The Rookie: North', 'The Rookie North'],
+      null,
+      1
+    ),
+    false
+  );
+});

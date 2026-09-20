@@ -3,7 +3,7 @@ import { getSetting } from '../../services/settings/index.js';
 import { getAppCache, setAppCache } from '../../services/core/app-cache.js';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
-const NEWEST_CACHE_TTL_MINUTES = 60;
+const BROWSE_CACHE_TTL_MINUTES = 180;
 
 const cache = new Map();
 
@@ -136,63 +136,6 @@ function todayIso() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-export async function getNowPlayingMoviesHandler(req, res) {
-  try {
-    const page = req.query.page ? Number(req.query.page) : 1;
-    const data = await fetchTmdb('/movie/now_playing', {
-      language: 'fr-FR',
-      region: 'FR',
-      page: Number.isFinite(page) && page > 0 ? page : 1
-    });
-
-    const results = mapTmdbListResult(data?.results, 'movie');
-    res.json({ results, page: data?.page || 1, totalPages: data?.total_pages || 1 });
-  } catch (error) {
-    res.status(500).json({ error: error instanceof Error ? error.message : 'Erreur serveur' });
-  }
-}
-
-export async function getOnTheAirTvHandler(req, res) {
-  try {
-    const page = req.query.page ? Number(req.query.page) : 1;
-    const data = await fetchTmdb('/tv/on_the_air', {
-      language: 'fr-FR',
-      page: Number.isFinite(page) && page > 0 ? page : 1
-    });
-
-    const results = mapTmdbListResult(data?.results, 'tv');
-    res.json({ results, page: data?.page || 1, totalPages: data?.total_pages || 1 });
-  } catch (error) {
-    res.status(500).json({ error: error instanceof Error ? error.message : 'Erreur serveur' });
-  }
-}
-
-export async function getUpcomingTvHandler(req, res) {
-  try {
-    const page = req.query.page ? Number(req.query.page) : 1;
-
-    // Best-effort "à venir": use popular list and keep items with a future first_air_date when available.
-    // We fetch a bit more and then cut to 20 client-side.
-    const data = await fetchTmdb('/tv/popular', {
-      language: 'fr-FR',
-      page: Number.isFinite(page) && page > 0 ? page : 1
-    });
-
-    const today = todayIso();
-    const raw = Array.isArray(data?.results) ? data.results : [];
-    const filtered = raw.filter((it) => {
-      const d = typeof it?.first_air_date === 'string' ? it.first_air_date : '';
-      if (!d) return false;
-      return d >= today;
-    });
-
-    const results = mapTmdbListResult(filtered, 'tv').slice(0, 20);
-    res.json({ results, page: data?.page || 1, totalPages: data?.total_pages || 1 });
-  } catch (error) {
-    res.status(500).json({ error: error instanceof Error ? error.message : 'Erreur serveur' });
-  }
-}
-
 function cleanTitle(title) {
   const yearMatch = title.match(/\b(19|20)\d{2}\b/);
   const year = yearMatch ? yearMatch[0] : '';
@@ -238,17 +181,30 @@ function mapSearchResultItem(item, type) {
 
 function hasPlayableTrailer(videos) {
   return videos.some(
-    (v) => v?.key && (v.site === 'YouTube' || v.site === 'Vimeo')
+    (v) =>
+      v?.key &&
+      (v.site === 'YouTube' || v.site === 'Vimeo') &&
+      (v.type === 'Trailer' || v.type === 'Teaser')
   );
 }
 
+/** Langues vidéo TMDB à fusionner (FR d’abord côté pickBestTrailer). */
+const VIDEO_INCLUDE_LANGUAGES = 'fr,en,nl,de,es,it,pt,ja,ko,zh,null';
+
 async function fetchVideosForMedia(mediaType, id) {
-  const fr = await fetchTmdb(`/${mediaType}/${id}/videos`, { language: 'fr-FR' });
+  const fr = await fetchTmdb(`/${mediaType}/${id}/videos`, {
+    language: 'fr-FR',
+    include_video_language: VIDEO_INCLUDE_LANGUAGES,
+  });
   const frResults = Array.isArray(fr?.results) ? fr.results : [];
   if (hasPlayableTrailer(frResults)) {
     return fr;
   }
-  return fetchTmdb(`/${mediaType}/${id}/videos`, {});
+
+  // Fallback : sans language UI, mais toutes langues vidéo (ex. BA NL sans FR/EN).
+  return fetchTmdb(`/${mediaType}/${id}/videos`, {
+    include_video_language: VIDEO_INCLUDE_LANGUAGES,
+  });
 }
 
 export async function searchTmdbHandler(req, res) {
@@ -336,58 +292,209 @@ export async function getTvSeasonDetailsHandler(req, res) {
   }
 }
 
-export async function getNewestMediaHandler(req, res) {
+const MOVIE_BROWSE_KINDS = new Set(['upcoming-cinema', 'recent-streaming', 'now-playing']);
+/** Fenêtre « vient de sortir » pour les plateformes (jours). */
+const STREAMING_RECENT_DAYS = 90;
+
+function daysAgoIso(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+async function fetchMovieBrowseList(kind, limit) {
+  const today = todayIso();
+  const pagesNeeded = Math.min(4, Math.max(1, Math.ceil(limit / 20)));
+
+  if (kind === 'now-playing') {
+    const pages = await Promise.all(
+      Array.from({ length: pagesNeeded }, (_, i) =>
+        fetchTmdb('/movie/now_playing', {
+          language: 'fr-FR',
+          region: 'FR',
+          page: i + 1,
+        })
+      )
+    );
+    const raw = pages.flatMap((p) => (Array.isArray(p?.results) ? p.results : []));
+    return mapTmdbListResult(
+      raw.filter((m) => m.poster_path && m.release_date && m.release_date <= today),
+      'movie'
+    ).slice(0, limit);
+  }
+
+  if (kind === 'upcoming-cinema') {
+    const pages = await Promise.all(
+      Array.from({ length: pagesNeeded }, (_, i) =>
+        fetchTmdb('/movie/upcoming', {
+          language: 'fr-FR',
+          region: 'FR',
+          page: i + 1,
+        })
+      )
+    );
+    const raw = pages.flatMap((p) => (Array.isArray(p?.results) ? p.results : []));
+    return mapTmdbListResult(
+      raw.filter((m) => m.poster_path && m.release_date && m.release_date >= today),
+      'movie'
+    ).slice(0, limit);
+  }
+
+  // recent-streaming : dispo en abonnement (FR) + sortie récente (comme Seerr, filtré récent)
+  // without_genres=99 : exclure documentaires (garde animation / fiction)
+  const since = daysAgoIso(STREAMING_RECENT_DAYS);
+  const pages = await Promise.all(
+    Array.from({ length: pagesNeeded }, (_, i) =>
+      fetchTmdb('/discover/movie', {
+        language: 'fr-FR',
+        region: 'FR',
+        watch_region: 'FR',
+        with_watch_monetization_types: 'flatrate',
+        without_genres: '99',
+        sort_by: 'primary_release_date.desc',
+        include_adult: 'false',
+        include_video: 'false',
+        'primary_release_date.gte': since,
+        'primary_release_date.lte': today,
+        page: i + 1,
+      })
+    )
+  );
+  const raw = pages.flatMap((p) => (Array.isArray(p?.results) ? p.results : []));
+  const seen = new Set();
+  const deduped = [];
+  for (const m of raw) {
+    if (!m?.id || seen.has(m.id)) continue;
+    if (!m.poster_path || !m.release_date) continue;
+    if (m.release_date < since || m.release_date > today) continue;
+    seen.add(m.id);
+    deduped.push(m);
+  }
+  return mapTmdbListResult(deduped, 'movie').slice(0, limit);
+}
+
+/**
+ * Listes films TMDB pour l’accueil / Voir plus.
+ * kind: upcoming-cinema | recent-streaming | now-playing
+ */
+export async function getMovieBrowseHandler(req, res) {
   try {
-    const limit = req.query.limit ? Number(req.query.limit) : 40;
-    const cacheKey = `tmdb-newest:${limit}`;
+    const kind = String(req.query.kind || '');
+    if (!MOVIE_BROWSE_KINDS.has(kind)) {
+      return res.status(400).json({
+        error: 'kind invalide (upcoming-cinema | recent-streaming | now-playing)',
+      });
+    }
+
+    const parsedLimit = req.query.limit ? Number(req.query.limit) : 40;
+    const limit = Number.isFinite(parsedLimit)
+      ? Math.min(80, Math.max(1, parsedLimit))
+      : 40;
+
+    const cacheKey = `tmdb-movie-browse:v3:${kind}:${limit}`;
     const cached = await getAppCache(cacheKey);
     if (cached) {
       return res.json(cached);
     }
 
-    // Fetch movies and TV shows in parallel
-    const [moviesData, tvData] = await Promise.all([
-      fetchTmdb('/movie/now_playing', {
-        language: 'fr-FR',
-        region: 'FR',
-        page: 1
-      }),
-      fetchTmdb('/trending/tv/week', {
-        language: 'fr-FR',
-        page: 1
-      })
-    ]);
+    const results = await fetchMovieBrowseList(kind, limit);
+    await setAppCache(cacheKey, results, BROWSE_CACHE_TTL_MINUTES);
+    res.json(results);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erreur serveur';
+    const status = message.includes('token manquant') ? 503 : 500;
+    res.status(status).json({ error: message });
+  }
+}
 
-    const today = todayIso();
+const TV_BROWSE_KINDS = new Set(['recent-streaming', 'trending']);
+/** Reality / Talk / News — bruit plateformes (garde animation / fiction). */
+const TV_STREAMING_EXCLUDE_GENRES = '10764,10767,10763';
 
-    // Filter and map movies (must have poster and be released)
-    const movies = mapTmdbListResult(
-      (moviesData?.results || []).filter(m => 
-        m.poster_path && m.release_date && m.release_date <= today
-      ),
-      'movie'
-    ).slice(0, limit);
+async function fetchTvBrowseList(kind, limit) {
+  const today = todayIso();
+  const pagesNeeded = Math.min(4, Math.max(1, Math.ceil(limit / 20)));
 
-    // Filter and map TV shows (must have poster and be released)
-    const shows = mapTmdbListResult(
-      (tvData?.results || []).filter(s => 
-        s.poster_path && s.first_air_date && s.first_air_date <= today
-      ),
+  if (kind === 'trending') {
+    const pages = await Promise.all(
+      Array.from({ length: pagesNeeded }, (_, i) =>
+        fetchTmdb('/trending/tv/week', {
+          language: 'fr-FR',
+          page: i + 1,
+        })
+      )
+    );
+    const raw = pages.flatMap((p) => (Array.isArray(p?.results) ? p.results : []));
+    return mapTmdbListResult(
+      raw.filter((s) => s.poster_path && s.first_air_date && s.first_air_date <= today),
       'tv'
     ).slice(0, limit);
+  }
 
-    // Interleave movies and shows for variety
-    const combined = [];
-    const maxLength = Math.max(movies.length, shows.length);
-    for (let i = 0; i < maxLength; i++) {
-      if (i < movies.length) combined.push(movies[i]);
-      if (i < shows.length) combined.push(shows[i]);
+  // recent-streaming : abonnement FR + 1ʳᵉ diffusion récente
+  const since = daysAgoIso(STREAMING_RECENT_DAYS);
+  const pages = await Promise.all(
+    Array.from({ length: pagesNeeded }, (_, i) =>
+      fetchTmdb('/discover/tv', {
+        language: 'fr-FR',
+        watch_region: 'FR',
+        with_watch_monetization_types: 'flatrate',
+        without_genres: TV_STREAMING_EXCLUDE_GENRES,
+        sort_by: 'first_air_date.desc',
+        include_adult: 'false',
+        include_null_first_air_dates: 'false',
+        'first_air_date.gte': since,
+        'first_air_date.lte': today,
+        page: i + 1,
+      })
+    )
+  );
+  const raw = pages.flatMap((p) => (Array.isArray(p?.results) ? p.results : []));
+  const seen = new Set();
+  const deduped = [];
+  for (const s of raw) {
+    if (!s?.id || seen.has(s.id)) continue;
+    if (!s.poster_path || !s.first_air_date) continue;
+    if (s.first_air_date < since || s.first_air_date > today) continue;
+    seen.add(s.id);
+    deduped.push(s);
+  }
+  return mapTmdbListResult(deduped, 'tv').slice(0, limit);
+}
+
+/**
+ * Listes séries TMDB pour l’accueil / Voir plus.
+ * kind: recent-streaming | trending
+ */
+export async function getTvBrowseHandler(req, res) {
+  try {
+    const kind = String(req.query.kind || '');
+    if (!TV_BROWSE_KINDS.has(kind)) {
+      return res.status(400).json({
+        error: 'kind invalide (recent-streaming | trending)',
+      });
     }
 
-    const result = combined.slice(0, limit);
-    await setAppCache(cacheKey, result, NEWEST_CACHE_TTL_MINUTES);
-    res.json(result);
+    const parsedLimit = req.query.limit ? Number(req.query.limit) : 40;
+    const limit = Number.isFinite(parsedLimit)
+      ? Math.min(80, Math.max(1, parsedLimit))
+      : 40;
+
+    const cacheKey = `tmdb-tv-browse:v1:${kind}:${limit}`;
+    const cached = await getAppCache(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
+    const results = await fetchTvBrowseList(kind, limit);
+    await setAppCache(cacheKey, results, BROWSE_CACHE_TTL_MINUTES);
+    res.json(results);
   } catch (error) {
-    res.status(500).json({ error: error instanceof Error ? error.message : 'Erreur serveur' });
+    const message = error instanceof Error ? error.message : 'Erreur serveur';
+    const status = message.includes('token manquant') ? 503 : 500;
+    res.status(status).json({ error: message });
   }
 }

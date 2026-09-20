@@ -6,6 +6,11 @@ import { resolveQbitCategory } from '../../services/utils/qbit-categories.js';
 import logger from '../../services/core/logger.js';
 import { checkInteractiveInventoryDuplicate } from '../../services/qbittorrent/inventory-guard.js';
 import { logActivity } from '../../services/activity-log/index.js';
+import {
+  applyStableTrackers,
+  applyStableTrackersToMaindata,
+  getStableTrackerMap,
+} from '../../services/qbittorrent/tracker-display.js';
 
 async function getQbitContextForUserId(_req, userId) {
   try {
@@ -20,30 +25,39 @@ async function getQbitContext(req) {
 }
 
 /**
+ * Liste torrents avec trackers (includeTrackers), fallback si qBit plus ancienne.
+ */
+async function fetchTorrentsInfoWithTrackers(qbitUrl, headers) {
+  try {
+    return await qBittorrentService.makeQBittorrentRequest(
+      `${qbitUrl}/api/v2/torrents/info?includeTrackers=true`,
+      { headers: { ...headers } }
+    );
+  } catch {
+    return await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/info`, {
+      headers: { ...headers },
+    });
+  }
+}
+
+/**
  * Récupère la liste des torrents
  */
 export async function getTorrentsHandler(req, res) {
   try {
-    // console.log('Récupération des informations qBittorrent pour l\'utilisateur:', req.user.id);
-    // console.log('Type de req.user.id:', typeof req.user.id);
-    // console.log('Instance de DB utilisée:', req.app.locals.db ? 'DB définie' : 'DB non définie');
-    
     const { qbitUrl, headers } = await getQbitContext(req);
 
     if (!qbitUrl) {
       return res.status(400).json({ error: 'URL qBittorrent non configurée' });
     }
 
-    // console.log('Envoi requête vers:', `${qbitUrl}/api/v2/torrents/info');
-    const data = await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/info`, {
-      headers: {
-        ...headers
-      }
-    });
-    
-    res.json(data);
+    // includeTrackers=true : même source que l'UI qBit (liste des announces),
+    // pas seulement le champ "tracker" courant qui change souvent à la pause.
+    const data = await fetchTorrentsInfoWithTrackers(qbitUrl, headers);
+
+    res.json(applyStableTrackers(Array.isArray(data) ? data : []));
   } catch (error) {
-    console.error('Erreur qBittorrent:', error);
+    logger.error('Erreur qBittorrent:', error);
     res.status(500).json({ error: error.message || 'Erreur lors de la récupération des torrents' });
   }
 }
@@ -87,30 +101,8 @@ export async function deleteTorrentHandler(req, res) {
 }
 
 /**
- * Récupère les détails d'un torrent
- */
-export async function getTorrentDetailsHandler(req, res) {
-  try {
-    const { hash } = req.params;
-    const { qbitUrl, headers } = await getQbitContext(req);
-    if (!qbitUrl) {
-      return res.status(400).json({ error: 'URL qBittorrent non configurée' });
-    }
-
-    const data = await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/properties?hash=${hash}`, {
-      headers: {
-        ...headers
-      }
-    });
-
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-}
-
-/**
- * Récupère les informations système
+ * Récupère les informations système (sync maindata)
+ * Enrichit chaque torrent avec un tracker d'affichage issu de la liste qBit.
  */
 export async function getMainDataHandler(req, res) {
   try {
@@ -120,17 +112,24 @@ export async function getMainDataHandler(req, res) {
       return res.status(400).json({ error: 'URL qBittorrent non configurée' });
     }
 
-    const data = await qBittorrentService.makeQBittorrentRequest(`${qbitUrl}/api/v2/sync/maindata`, {
-      headers: {
-        ...headers
-      }
-    });
+    const rid = req.query.rid != null ? String(req.query.rid) : '0';
+    const data = await qBittorrentService.makeQBittorrentRequest(
+      `${qbitUrl}/api/v2/sync/maindata?rid=${encodeURIComponent(rid)}`,
+      { headers: { ...headers } }
+    );
+
+    // Trackers stables : refresh includeTrackers au plus toutes les 60 s (pas à chaque poll maindata).
+    const cacheKey = String(req.user.id);
+    const stableByHash = await getStableTrackerMap(cacheKey, async () =>
+      fetchTorrentsInfoWithTrackers(qbitUrl, headers)
+    );
+    applyStableTrackersToMaindata(data, stableByHash);
 
     res.json(data);
   } catch (error) {
     // Ne logger que les erreurs non liées à la connexion pour réduire le bruit
     if (error.message && !error.message.includes('ECONNREFUSED')) {
-      console.error('Erreur qBittorrent:', error);
+      logger.error('Erreur qBittorrent:', error);
     }
     res.status(500).json({ error: error.message || 'Erreur lors de la récupération des informations système' });
   }
@@ -154,7 +153,7 @@ export async function getCategoriesHandler(req, res) {
 
     res.json(categories);
   } catch (error) {
-    console.error('Error fetching categories:', error);
+    logger.error('Error fetching categories:', error);
     res.status(500).json({ error: error.message });
   }
 }
@@ -252,7 +251,9 @@ export async function addTorrentHandler(req, res) {
       return res.status(inventoryCheck.status || 409).json({
         success: false,
         error: inventoryCheck.error,
-        details: inventoryCheck.details
+        details: inventoryCheck.details,
+        present: inventoryCheck.present === true,
+        matches: inventoryCheck.matches || [],
       });
     }
 
@@ -296,17 +297,19 @@ export async function addTorrentHandler(req, res) {
       }
     });
 
-    if (qbResponse === 'Fails.') {
+    try {
+      qBittorrentService.assertQbitAddSucceeded(qbResponse);
+    } catch (err) {
       return res.status(400).json({
         success: false,
-        error: "qBittorrent n'a pas pu ajouter le torrent",
+        error: err.message || "qBittorrent n'a pas pu ajouter le torrent",
         qbResponse
       });
     }
 
     res.json({ success: true, message: 'Torrents ajoutés avec succès', qbResponse });
   } catch (error) {
-    console.error('Erreur complète dans addTorrentHandler:', error);
+    logger.error('Erreur complète dans addTorrentHandler:', error);
     res.status(500).json({ error: error.message });
   }
 }
@@ -457,7 +460,7 @@ export async function pauseHandler(req, res) {
 
     res.json({ success: true, message: responseText });
   } catch (error) {
-    console.error('Erreur pause torrent:', error);
+    logger.error('Erreur pause torrent:', error);
     res.status(500).json({ 
       error: error.message || 'Erreur lors de la mise en pause du torrent',
       details: error.toString()
@@ -494,7 +497,7 @@ export async function createCategoryHandler(req, res) {
 
     res.json({ success: true });
   } catch (error) {
-    console.error('Erreur création catégorie:', error);
+    logger.error('Erreur création catégorie:', error);
     res.status(500).json({ error: error.message });
   }
 }
@@ -530,7 +533,7 @@ export async function resumeHandler(req, res) {
 
     res.json({ success: true, message: responseText });
   } catch (error) {
-    console.error('Erreur reprise torrent:', error);
+    logger.error('Erreur reprise torrent:', error);
     res.status(500).json({ 
       error: error.message || 'Erreur lors de la reprise du torrent',
       details: error.toString()

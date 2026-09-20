@@ -1,6 +1,10 @@
 // Handlers pour les routes des paramètres de l'application
 import * as settingsService from '../../services/settings/index.js';
 import schedulerService from '../../services/core/scheduler.js';
+import {
+  generateCalendarApiKey,
+  clearCalendarCache,
+} from '../../services/calendar/index.js';
 
 // Paramètres exposés aux utilisateurs connectés (sans secrets)
 const PUBLIC_SETTINGS = ['min_seeds'];
@@ -45,7 +49,11 @@ const ADMIN_ONLY_SETTINGS = [
   'emby_url',
   'emby_api_key',
   'emby_library_ids',
-  'emby_sync_interval_minutes'
+  'emby_sync_interval_minutes',
+  'calendar_api_key',
+  'organizr_sso_enabled',
+  'organizr_url',
+  'organizr_auth_group',
 ];
 
 // Tous les paramètres
@@ -256,6 +264,25 @@ export async function updateGlobalSettingsHandler(req, res) {
       settings.emby_sync_interval_minutes = Math.round(n);
     }
 
+    if (Object.prototype.hasOwnProperty.call(settings, 'calendar_api_key')) {
+      const v = settings.calendar_api_key;
+      if (typeof v !== 'string' || v.length < 16 || v.length > 128) {
+        return res.status(400).json({ error: 'calendar_api_key invalide (16–128 caractères)' });
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(settings, 'organizr_url')) {
+      const v = String(settings.organizr_url || '').trim();
+      if (v && !/^https?:\/\//i.test(v)) {
+        return res.status(400).json({ error: 'organizr_url doit commencer par http:// ou https://' });
+      }
+      settings.organizr_url = v.replace(/\/$/, '');
+    }
+
+    if (Object.prototype.hasOwnProperty.call(settings, 'organizr_auth_group')) {
+      settings.organizr_auth_group = String(settings.organizr_auth_group || '998').trim() || '998';
+    }
+
     for (const [key, value] of Object.entries(settings)) {
       if (value !== undefined) {
         await settingsService.saveSetting(key, value);
@@ -316,5 +343,20 @@ export async function deleteSettingHandler(req, res) {
   } catch (error) {
     console.error(`Erreur lors de la suppression du paramètre ${name}:`, error);
     res.status(500).json({ error: 'Une erreur est survenue lors de la suppression du paramètre' });
+  }
+}
+
+/**
+ * Génère et enregistre une nouvelle clé API calendrier (admin).
+ */
+export async function generateCalendarApiKeyHandler(req, res) {
+  try {
+    const key = generateCalendarApiKey();
+    await settingsService.saveSetting('calendar_api_key', key);
+    clearCalendarCache();
+    res.json({ calendar_api_key: key });
+  } catch (error) {
+    console.error('Erreur lors de la génération de la clé calendrier:', error);
+    res.status(500).json({ error: 'Impossible de générer la clé calendrier' });
   }
 }

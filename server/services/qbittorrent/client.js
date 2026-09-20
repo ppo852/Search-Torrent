@@ -105,12 +105,11 @@ export function buildQbitAuthHeaders(apiKey, qbitUrl) {
 }
 
 /**
- * Obtient les informations qBittorrent de l'utilisateur
- * @param {Object} db - Instance de la base de données (paramètre ignoré)
- * @param {string} userId - ID de l'utilisateur
- * @returns {Promise<Object>} - Informations de connexion qBittorrent de l'utilisateur
+ * Obtient les informations qBittorrent de l'utilisateur (URL + clé API).
+ * @param {string} userId - ID utilisateur Search-Torrent
+ * @returns {Promise<Object>}
  */
-export async function getQBitUserInfo(db, userId) {
+export async function getQBitUserInfo(userId) {
   try {
     const row = await getDb('SELECT qbit_url, qbit_api_key FROM users WHERE id = ?', [userId]);
     return row || {};
@@ -136,6 +135,8 @@ export async function addTorrentUrlForUser(userId, urlOrMagnet, options = {}) {
       value = resolved.value;
       magnetFromRedirect = true;
     } else if (resolved?.type === 'url' && typeof resolved.value === 'string') {
+      value = resolved.value;
+    } else if (resolved?.type === 'torrent_url' && typeof resolved.value === 'string') {
       value = resolved.value;
     }
   }
@@ -163,7 +164,7 @@ export async function addTorrentUrlForUser(userId, urlOrMagnet, options = {}) {
     formData.append('tags', String(options.tags));
   }
 
-  logger.info(`[qBit] Envoi vers qBittorrent: URL="${value.substring(0, 60)}..." | Catégorie="${options?.category || 'aucune'}" | Tags="${options?.tags || 'aucun'}"`);
+  logger.debug('qbit', `[qBit] Envoi vers qBittorrent: URL="${value.substring(0, 60)}..." | Catégorie="${options?.category || 'aucune'}" | Tags="${options?.tags || 'aucun'}"`);
 
   const qbResponse = await makeQBittorrentRequest(`${qbitUrl}/api/v2/torrents/add`, {
     method: 'POST',
@@ -174,13 +175,36 @@ export async function addTorrentUrlForUser(userId, urlOrMagnet, options = {}) {
     }
   });
 
-  logger.debug('qbit', `Réponse qBittorrent: "${qbResponse}"`);
+  logger.debug('qbit', `Réponse qBittorrent: ${typeof qbResponse === 'string' ? qbResponse : JSON.stringify(qbResponse)}`);
 
+  assertQbitAddSucceeded(qbResponse);
+
+  return qbResponse;
+}
+
+/**
+ * Anciennes qBit : texte "Ok." / "Fails."
+ * qBit récentes : { success_count, pending_count, failure_count }
+ * pending_count > 0 = accepté en async (URL/magnet) → succès, pas une erreur.
+ */
+export function assertQbitAddSucceeded(qbResponse) {
   if (qbResponse === 'Fails.') {
     throw new Error("qBittorrent n'a pas pu ajouter le torrent");
   }
 
-  return qbResponse;
+  if (qbResponse && typeof qbResponse === 'object' && !Array.isArray(qbResponse) && 'success_count' in qbResponse) {
+    const success = Number(qbResponse.success_count) || 0;
+    const pending = Number(qbResponse.pending_count) || 0;
+    const failure = Number(qbResponse.failure_count) || 0;
+
+    if (success > 0 || pending > 0) return;
+
+    if (failure > 0) {
+      throw new Error("qBittorrent a refusé l'ajout du torrent");
+    }
+
+    throw new Error("qBittorrent n'a pas confirmé l'ajout du torrent");
+  }
 }
 
 /**
@@ -236,7 +260,7 @@ export async function getTransferInfo(userId) {
  * @returns {Promise<{qbitUrl: string, headers: Object}>}
  */
 export async function getAuthenticatedQbitConfig(userId) {
-  const user = await getQBitUserInfo(null, userId);
+  const user = await getQBitUserInfo(userId);
   if (!user?.qbit_url) {
     throw new Error('URL qBittorrent non configurée');
   }
@@ -246,11 +270,3 @@ export async function getAuthenticatedQbitConfig(userId) {
 
   return { qbitUrl, headers };
 }
-
-export default {
-  getQBitUserInfo,
-  addTorrentUrlForUser,
-  getAuthenticatedQbitConfig,
-  makeQBittorrentRequest,
-  getTransferInfo
-};

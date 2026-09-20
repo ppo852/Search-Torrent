@@ -5,15 +5,16 @@ import config from '../core/config.js';
 /**
  * Génère un token JWT pour un utilisateur
  * @param {Object} user - Objet utilisateur à encoder dans le token
+ * @param {{ authVia?: 'password'|'organizr' }} [options]
  * @returns {string} Token JWT généré
  */
-export function generateToken(user) {
-  // Sélectionner uniquement les propriétés nécessaires pour le token
+export function generateToken(user, { authVia = 'password' } = {}) {
   const payload = {
     id: user.id,
     username: user.username,
     is_admin: user.is_admin,
-    iat: Math.floor(Date.now() / 1000)
+    auth_via: authVia === 'organizr' ? 'organizr' : 'password',
+    iat: Math.floor(Date.now() / 1000),
   };
 
   return jwt.sign(

@@ -206,7 +206,7 @@ export async function findEmbyMatches({ kind, title, year, season, episode, tmdb
 }
 
 /**
- * Épisodes présents dans Emby pour une saison (TMDB puis titre).
+ * Épisodes présents dans Emby pour une saison (TMDB ID, sinon titre).
  */
 export async function findEmbySeasonEpisodes({ tmdb_id, title, season }) {
   await ensureEmbySchema();
@@ -215,8 +215,9 @@ export async function findEmbySeasonEpisodes({ tmdb_id, title, season }) {
 
   const episodeSet = new Set();
   const id = Number(tmdb_id);
+  const hasTmdbId = Number.isInteger(id) && id > 0;
 
-  if (id > 0) {
+  if (hasTmdbId) {
     const rowsById = await query(
       `SELECT episode FROM emby_media_inventory
        WHERE media_kind = 'tv' AND tmdb_id = ? AND season = ?`,
@@ -225,6 +226,7 @@ export async function findEmbySeasonEpisodes({ tmdb_id, title, season }) {
     for (const r of rowsById || []) {
       if (r.episode != null) episodeSet.add(r.episode);
     }
+    return Array.from(episodeSet);
   }
 
   const titleNorm = normalizeTitleForDb(title);

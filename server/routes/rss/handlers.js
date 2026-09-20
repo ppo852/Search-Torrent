@@ -5,6 +5,8 @@ import rssCache from '../../services/rss/cache.js';
 import { deleteAppCacheByPrefix } from '../../services/core/app-cache.js';
 import * as db from '../../services/core/db.js';
 import { getRecentForHome } from '../../services/rss/recent-for-home.js';
+import { RSS_HOME_HOURS } from '../../../shared/rss-home-hours.js';
+import { normalizeRssFeedUrl } from '../../services/rss/feed-url.js';
 
 /**
  * Récupère tous les flux RSS
@@ -79,21 +81,37 @@ export async function getAllRssItems(req, res) {
  * @param {Object} res - Réponse Express
  */
 export async function addFeed(req, res) {
-
   const { feed_name, feed_url } = req.body;
-  
+
   if (!feed_name || !feed_url) {
     return res.status(400).json({ error: 'Le nom et l\'URL du flux sont requis' });
   }
 
+  const name = String(feed_name).trim();
+  const normalizedUrl = normalizeRssFeedUrl(feed_url);
+  if (!name || !normalizedUrl) {
+    return res.status(400).json({ error: 'Le nom et l\'URL du flux sont requis' });
+  }
+
   try {
+    const existingFeeds = await db.query('SELECT id, feed_name, feed_url FROM global_rss_feeds');
+    const duplicate = (existingFeeds || []).find(
+      (feed) => normalizeRssFeedUrl(feed.feed_url) === normalizedUrl
+    );
+    if (duplicate) {
+      return res.status(409).json({
+        error: `Ce flux existe déjà (« ${duplicate.feed_name} »). Même tracker / même URL.`,
+        existing: { id: duplicate.id, feed_name: duplicate.feed_name, feed_url: duplicate.feed_url },
+      });
+    }
+
     const id = randomUUID();
     await db.run(
       'INSERT INTO global_rss_feeds (id, feed_name, feed_url, created_at) VALUES (?, ?, ?, ?)',
-      [id, feed_name, feed_url, new Date().toISOString()]
+      [id, name, normalizedUrl, new Date().toISOString()]
     );
-    
-    res.status(201).json({ id, feed_name, feed_url });
+
+    res.status(201).json({ id, feed_name: name, feed_url: normalizedUrl });
   } catch (error) {
     console.error('Erreur lors de l\'ajout du flux RSS:', error);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -255,8 +273,8 @@ export async function getRecentHome(req, res) {
   try {
     const parsedHours = parseInt(req.query.hours, 10);
     const hours = Number.isFinite(parsedHours)
-      ? Math.min(168, Math.max(1, parsedHours))
-      : 72;
+      ? Math.min(RSS_HOME_HOURS, Math.max(1, parsedHours))
+      : RSS_HOME_HOURS;
 
     const result = await getRecentForHome({ hours });
     res.json(result);

@@ -2,6 +2,9 @@ import fetch from 'node-fetch';
 import { getSetting } from '../settings/index.js';
 import logger from '../core/logger.js';
 
+/** Genre TMDB « Documentaire » (movies). */
+export const TMDB_DOCUMENTARY_GENRE_ID = 99;
+
 /**
  * Service centralisé pour l'API TMDB côté serveur
  */
@@ -68,15 +71,54 @@ class TmdbService {
           }
         }
 
+        const genres = (data.genres || []).map((g) => ({ id: g.id, name: g.name }));
+
         return {
           tmdbId,
           type,
           mainTitle: type === 'movie' ? data.title : data.name,
           originalTitle: type === 'movie' ? data.original_title : data.original_name,
-          titles: Array.from(titles).filter(Boolean)
+          titles: Array.from(titles).filter(Boolean),
+          genres,
+          isDocumentary: genres.some((g) => g.id === TMDB_DOCUMENTARY_GENRE_ID),
         };
       } catch (error) {
         logger.error(`[TMDB] Erreur lors de la récupération des détails pour ${type} ${tmdbId}:`, error);
+        return null;
+      }
+    });
+  }
+
+  /**
+   * IDs externes TMDB (TVDB, IMDb…) pour recherche indexer type Sonarr/Radarr.
+   */
+  async getExternalIds(tmdbId, type = 'tv') {
+    if (!tmdbId) return null;
+
+    let mediaType;
+    if (type === 'anime') mediaType = 'tv';
+    else if (type === 'animation' || type === 'movie' || type === 'movies') mediaType = 'movie';
+    else if (type === 'tv') mediaType = 'tv';
+    else return null;
+
+    const cacheKey = `external_ids:${mediaType}:${tmdbId}`;
+    return this.withCache(cacheKey, async () => {
+      try {
+        const headers = await this.getHeaders();
+        const response = await fetch(`${this.BASE_URL}/${mediaType}/${tmdbId}/external_ids`, { headers });
+        if (!response.ok) return null;
+
+        const data = await response.json();
+        const result = {
+          tmdbId: Number(tmdbId),
+          imdbId: data.imdb_id ? String(data.imdb_id) : null,
+        };
+        if (mediaType === 'tv' && data.tvdb_id) {
+          result.tvdbId = Number(data.tvdb_id);
+        }
+        return result;
+      } catch (error) {
+        logger.error(`[TMDB] Erreur external_ids pour ${mediaType} ${tmdbId}:`, error);
         return null;
       }
     });

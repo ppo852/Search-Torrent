@@ -27,6 +27,7 @@ export function MobileBottomNav({ inIframe = false }: MobileBottomNavProps) {
         <NavLink
           key={item.name}
           to={item.href}
+          end={item.href === '/'}
           onClick={() => handleNavItemClick(item.href, resetSearch)}
           className={({ isActive }) => `
               flex flex-col items-center justify-center gap-1.5 w-16 h-14 rounded-xl transition-all duration-300
@@ -34,7 +35,9 @@ export function MobileBottomNav({ inIframe = false }: MobileBottomNavProps) {
             `}
         >
           <item.icon size={22} className={location.pathname === item.href ? 'scale-110' : ''} />
-          <span className="text-[8px] font-black uppercase tracking-widest">{item.name}</span>
+          <span className="text-[8px] font-black uppercase tracking-widest">
+            {item.shortName || item.name}
+          </span>
         </NavLink>
       ))}
       {user?.is_admin && (

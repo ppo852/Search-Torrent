@@ -181,8 +181,8 @@ export async function isPresent({ kind, title, year, season, episode, tmdb_id })
 }
 
 /**
- * Récupère tous les épisodes présents pour une saison donnée (Batch check).
- * Disque OU Emby : TMDB d'abord, puis fallback titre.
+ * Disque OU Emby : par TMDB ID si fourni, sinon fallback titre.
+ * Si tmdb_id > 0 : ID + fallback disque (même titre, tmdb_id vide).
  */
 export async function getSeasonPresence({ tmdb_id, title, season }) {
   const s = Number(season);
@@ -191,8 +191,10 @@ export async function getSeasonPresence({ tmdb_id, title, season }) {
   const dbg = String(process.env.DEBUG_MEDIA_INVENTORY || '').toLowerCase() === '1';
   const id = Number(tmdb_id);
   const episodeSet = new Set();
+  const hasTmdbId = Number.isInteger(id) && id > 0;
+  const titleNorm = title ? normalizeTitleForDb(title) : '';
 
-  if (id > 0) {
+  if (hasTmdbId) {
     const rowsById = await query(
       `SELECT episode FROM local_media_inventory
        WHERE media_kind = 'tv' AND tmdb_id = ? AND season = ?`,
@@ -201,10 +203,20 @@ export async function getSeasonPresence({ tmdb_id, title, season }) {
     for (const r of rowsById || []) {
       if (r.episode != null) episodeSet.add(r.episode);
     }
-  }
 
-  const titleNorm = normalizeTitleForDb(title);
-  if (titleNorm) {
+    // Fallback disque : fichiers non tagués TMDB, même titre
+    if (titleNorm) {
+      const rowsUntagged = await query(
+        `SELECT episode FROM local_media_inventory
+         WHERE media_kind = 'tv' AND title_normalized = ? AND season = ?
+           AND (tmdb_id IS NULL OR tmdb_id = 0)`,
+        [titleNorm, s]
+      );
+      for (const r of rowsUntagged || []) {
+        if (r.episode != null) episodeSet.add(r.episode);
+      }
+    }
+  } else if (titleNorm) {
     const rowsByTitle = await query(
       `SELECT episode FROM local_media_inventory
        WHERE media_kind = 'tv' AND title_normalized = ? AND season = ?`,
@@ -216,7 +228,11 @@ export async function getSeasonPresence({ tmdb_id, title, season }) {
   }
 
   try {
-    const embyEps = await findEmbySeasonEpisodes({ tmdb_id, title, season: s });
+    const embyEps = await findEmbySeasonEpisodes({
+      tmdb_id: hasTmdbId ? id : null,
+      title: hasTmdbId ? null : title,
+      season: s,
+    });
     for (const ep of embyEps || []) {
       if (ep != null) episodeSet.add(ep);
     }

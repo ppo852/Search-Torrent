@@ -22,7 +22,6 @@ import { api } from '../services/api';
 
 export const QBittorrentPage: React.FC = () => {
   const navigate = useNavigate();
-  const [invalidDrop, setInvalidDrop] = React.useState(false);
   const [droppedTorrentFiles, setDroppedTorrentFiles] = useState<File[]>([]);
   const [torrents, setTorrents] = useState<Torrent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -100,7 +99,6 @@ export const QBittorrentPage: React.FC = () => {
   const { isDragging, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = useGlobalDragAndDrop((files) => {
     setDroppedTorrentFiles(files);
     openAddModal();
-    setInvalidDrop(false);
   });
 
   const sortedTorrents = useMemo(() => {
@@ -126,7 +124,7 @@ export const QBittorrentPage: React.FC = () => {
   const paginatedTorrents = sortedTorrents.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
   
   const changeSorting = (field: SortField) => {
-    setSorting(prev => ({ field, direction: prev.field === field ? (prev.direction === 'asc' ? 'desc' : 'asc') : 'asc' }));
+    setSorting(prev => (prev.field === field ? prev : { ...prev, field }));
   };
 
   useEffect(() => {
@@ -184,9 +182,9 @@ export const QBittorrentPage: React.FC = () => {
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 lg:gap-6">
           <div>
             <h1 className="text-base lg:text-xl font-black text-white tracking-tighter uppercase mb-1">
-              Contrôle <span className="text-blue-500">Torrents</span>
+              Contrôle <span className="text-blue-500">Téléchargements</span>
             </h1>
-            <p className="text-gray-500 font-medium italic text-[10px] lg:text-sm">Gestion des flux et téléchargements en temps réel</p>
+            <p className="text-blue-400/60 font-medium italic text-[10px] lg:text-sm">Gestion des flux et téléchargements en temps réel</p>
           </div>
           
           <div className="flex items-center gap-3 w-full lg:w-auto">
@@ -200,43 +198,39 @@ export const QBittorrentPage: React.FC = () => {
           </div>
         </div>
         
-        {stats && (
-          <div className="glass-card p-6 border-white/5">
-            <StatsDisplay stats={stats} />
-          </div>
-        )}
+        {stats && <StatsDisplay stats={stats} />}
         
-        <div className="glass-card p-4 border-white/5">
-          <TorrentFilters
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            currentSortField={sorting.field}
-            sortDirection={sorting.direction}
-            onSortChange={changeSorting}
-            onDirectionChange={() => setSorting(prev => ({ ...prev, direction: prev.direction === 'asc' ? 'desc' : 'asc' }))}
-            currentStatus={currentStatus}
-            onStatusChange={setCurrentStatus}
-            categories={categories}
-            currentCategory={currentCategory}
-            onCategoryChange={setCurrentCategory}
-            trackers={trackers}
-            currentTracker={currentTracker}
-            onTrackerChange={setCurrentTracker}
-          />
-        </div>
+        <TorrentFilters
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          currentSortField={sorting.field}
+          sortDirection={sorting.direction}
+          onSortChange={changeSorting}
+          onDirectionChange={() => setSorting(prev => ({ ...prev, direction: prev.direction === 'asc' ? 'desc' : 'asc' }))}
+          currentStatus={currentStatus}
+          onStatusChange={setCurrentStatus}
+          categories={categories}
+          currentCategory={currentCategory}
+          onCategoryChange={setCurrentCategory}
+          trackers={trackers}
+          currentTracker={currentTracker}
+          onTrackerChange={setCurrentTracker}
+        />
+
+        <div className="border-t border-blue-500/20 my-2" aria-hidden="true" />
         
-        <div className="glass-card min-h-[400px] overflow-hidden border-white/5">
+        <div className="min-h-[400px]">
           {isLoading && torrents.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-32">
               <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4" />
-              <p className="text-gray-500 font-bold uppercase text-xs animate-pulse">Initialisation...</p>
+              <p className="text-blue-400/60 font-bold uppercase text-xs animate-pulse">Initialisation...</p>
             </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center py-32 text-center px-6">
               <X className="h-12 w-12 text-red-500 mb-4" />
               <p className="text-white font-bold uppercase tracking-tighter">Erreur qBittorrent</p>
-              <p className="text-gray-500 text-sm mb-6">Vérifiez la configuration système.</p>
-              <button onClick={fetchTorrents} className="px-6 py-2 bg-white/5 border border-white/10 rounded-xl text-white font-bold hover:bg-white/10 transition-all">Réessayer</button>
+              <p className="text-blue-400/60 text-sm mb-6">Vérifiez la configuration système.</p>
+              <button onClick={fetchTorrents} className="px-6 py-2 bg-blue-600/10 border border-blue-500/20 rounded-xl text-white font-bold hover:bg-blue-600/20 transition-all">Réessayer</button>
             </div>
           ) : filteredTorrents.length === 0 ? (
             <EmptyState
@@ -256,7 +250,7 @@ export const QBittorrentPage: React.FC = () => {
               }
             />
           ) : (
-            <div className="divide-y divide-white/5">
+            <div className="space-y-4">
               <div ref={torrentsContainerRef}>
                 <TorrentList
                   torrents={paginatedTorrents}
@@ -268,7 +262,7 @@ export const QBittorrentPage: React.FC = () => {
                 />
               </div>
               {filteredTorrents.length > itemsPerPage && (
-                <div className="p-6 bg-black/20">
+                <div className="p-6 bg-transparent">
                   <TorrentListPagination
                     currentPage={currentPage}
                     totalPages={totalPages}

@@ -44,6 +44,7 @@ export async function saveRSSCache(feedId, feedUrl, itemsJson, itemsWithTMDB, op
   const lastUpdated = now.toISOString();
   
   // Si expiresAt n'est pas fourni, définir par défaut à 30 minutes dans le futur
+  // (fraîcheur du re-fetch). Les items cumulés suivent RSS_ITEM_RETENTION_HOURS (merge-retention).
   const cacheDurationMinutes = options.cacheDurationMinutes || 30;
   const expiresAt = options.expiresAt || new Date(now.getTime() + cacheDurationMinutes * 60000).toISOString();
 

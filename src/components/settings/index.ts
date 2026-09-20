@@ -4,3 +4,4 @@
  */
 
 export { UserSettingsModal } from './UserSettingsModal';
+export { AdminOrganizrPanel } from './AdminOrganizrPanel';

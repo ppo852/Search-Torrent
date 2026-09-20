@@ -3,6 +3,7 @@ import {
   getAuthenticatedQbitConfig,
   makeQBittorrentRequest,
   addTorrentUrlForUser,
+  assertQbitAddSucceeded,
   getTransferInfo
 } from './client.js';
 
@@ -11,5 +12,6 @@ export default {
   getAuthenticatedQbitConfig,
   makeQBittorrentRequest,
   addTorrentUrlForUser,
+  assertQbitAddSucceeded,
   getTransferInfo
 };

@@ -52,6 +52,16 @@ export async function getSetting(name) {
   }
 }
 
+const DEFAULT_MIN_SEEDS = 0;
+
+/**
+ * Seuil global Admin : nombre minimum de seeders pour garder un torrent dans les résultats.
+ */
+export async function resolveMinSeeds() {
+  const minSeedsSetting = await getSetting('min_seeds');
+  return typeof minSeedsSetting === 'number' ? minSeedsSetting : DEFAULT_MIN_SEEDS;
+}
+
 /**
  * Enregistre ou met à jour un paramètre
  * @param {string} name - Nom du paramètre

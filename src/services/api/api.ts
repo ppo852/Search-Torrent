@@ -1,5 +1,6 @@
 import { useAuthStore } from '../../stores/authStore';
 import { getCategoryLabel, normalizeQbitCategory, resolveQbitCategory } from '../../lib/categories';
+import { RSS_HOME_HOURS } from '../../lib/rss-home';
 
 export interface TvSeasonStatusRow {
   season_number: number;
@@ -60,6 +61,74 @@ class API {
       body: JSON.stringify({ username, password }),
     });
 
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  /** Statut SSO Organizr (public) */
+  async getOrganizrSsoStatus(): Promise<{ enabled: boolean; authGroup?: string }> {
+    const response = await fetch('/api/auth/organizr-sso/status');
+    if (!response.ok) {
+      return { enabled: false };
+    }
+    return response.json();
+  }
+
+  async testOrganizrSso(): Promise<{ ok: boolean; message?: string; httpStatus?: number }> {
+    const response = await fetch('/api/auth/organizr-sso/test', {
+      method: 'POST',
+      headers: this.getHeaders(),
+    });
+    await this.handleResponse(response);
+    return response.json();
+  }
+
+  /**
+   * SSO via cookie Organizr. Ne déclenche pas de logout global sur 401
+   * (cookie absent = cas normal sur la page login).
+   */
+  async loginWithOrganizr(): Promise<
+    | { ok: true; token: string; user: any }
+    | { ok: false; status: number; error: string; code?: string }
+  > {
+    const response = await fetch('/api/auth/organizr-sso', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const body = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        error: body.error || 'SSO Organizr impossible',
+        code: body.code,
+      };
+    }
+
+    return { ok: true, token: body.token, user: body.user };
+  }
+
+  /**
+   * Resync session SSO (lié Organizr). Toujours 200 + action
+   * pour ne pas déclencher le logout global sur 401.
+   */
+  async syncOrganizrSession(): Promise<{
+    action: 'noop' | 'same' | 'switched' | 'logout';
+    token?: string;
+    user?: any;
+    code?: string;
+    error?: string;
+  }> {
+    const response = await fetch('/api/auth/organizr-sso/sync', {
+      method: 'POST',
+      credentials: 'include',
+      headers: this.getHeaders(),
+    });
     await this.handleResponse(response);
     return response.json();
   }
@@ -159,6 +228,16 @@ class API {
     });
 
     return this.handleResponse(response);
+  }
+
+  async generateCalendarApiKey() {
+    const response = await fetch('/api/settings/calendar-api-key', {
+      method: 'POST',
+      headers: this.getHeaders(),
+    });
+
+    await this.handleResponse(response);
+    return response.json() as Promise<{ calendar_api_key: string }>;
   }
 
   // Méthodes pour qBittorrent
@@ -686,22 +765,46 @@ class API {
     return response.json();
   }
 
-  async searchMovie(title: string, year?: string, tmdbId?: number, mediaType?: 'movie' | 'animation') {
+  async searchMovie(
+    title: string,
+    year?: string,
+    tmdbId?: number,
+    mediaType?: 'movie' | 'animation',
+    options?: { expandTextSearch?: boolean }
+  ) {
     const response = await fetch('/api/prowlarr/search/movie', {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify({ title, year, tmdbId, mediaType })
+      body: JSON.stringify({
+        title,
+        year,
+        tmdbId,
+        mediaType,
+        expandTextSearch: options?.expandTextSearch === true,
+      })
     });
 
     await this.handleResponse(response);
     return response.json();
   }
 
-  async searchTvSeries(title: string, mediaType?: string, tmdbId?: number, year?: string) {
+  async searchTvSeries(
+    title: string,
+    mediaType?: string,
+    tmdbId?: number,
+    year?: string,
+    options?: { expandTextSearch?: boolean }
+  ) {
     const response = await fetch('/api/prowlarr/search/tv', {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify({ title, mediaType, tmdbId, year })
+      body: JSON.stringify({
+        title,
+        mediaType,
+        tmdbId,
+        year,
+        expandTextSearch: options?.expandTextSearch === true,
+      })
     });
 
     await this.handleResponse(response);
@@ -787,7 +890,7 @@ class API {
     return response.json();
   }
 
-  async getRssRecentHome(hours = 72) {
+  async getRssRecentHome(hours = RSS_HOME_HOURS) {
     const response = await fetch(`/api/rss/recent-home?hours=${hours}`, {
       headers: this.getHeaders(),
     });

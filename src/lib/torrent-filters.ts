@@ -10,7 +10,7 @@ export const QUALITY_FILTER_OPTIONS: { value: QualityFilter; label: string }[] =
 ];
 
 export const LANGUAGE_FILTER_OPTIONS: { value: LanguageFilter; label: string }[] = [
-  { value: 'admin', label: 'Profil par défaut' },
+  { value: 'admin', label: 'Défaut' },
   { value: 'all', label: 'Toutes' },
   { value: 'multi', label: 'MULTI' },
   { value: 'vf', label: 'VF' },

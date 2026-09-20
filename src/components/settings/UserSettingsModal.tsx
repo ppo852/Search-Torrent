@@ -1,26 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Shield, HardDrive, Key, Folder, CheckCircle, AlertCircle, Server, Globe, ShieldCheck } from 'lucide-react';
+import { X, Save, Shield, HardDrive, Key, Folder, CheckCircle, AlertCircle, Globe, ShieldCheck } from 'lucide-react';
 import api from '../../services/api';
 import { useAuthStore } from '../../stores/authStore';
-
-interface UserData {
-  id: string;
-  username: string;
-  is_admin: boolean;
-  qbit_url?: string;
-  has_qbit_api_key?: boolean;
-  download_path_movies?: string;
-  download_path_series?: string;
-  download_path_anime?: string;
-  download_path_animation?: string;
-  allow_force_interactive_download?: boolean;
-}
+import type { AdminUser } from '../../types';
 
 interface UserSettingsModalProps {
-  user: UserData | null;
+  user: AdminUser | null;
   isOpen: boolean;
   onClose: () => void;
-  onUserUpdated: (updatedUser?: UserData) => void;
+  onUserUpdated: (updatedUser?: AdminUser) => void;
 }
 
 type TabType = 'qbit' | 'media' | 'security';
@@ -36,6 +24,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ user, isOp
     download_path_anime: '',
     download_path_animation: '',
     allow_force_interactive_download: false,
+    is_admin: false,
   });
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -52,6 +41,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ user, isOp
         download_path_anime: user.download_path_anime || '',
         download_path_animation: user.download_path_animation || '',
         allow_force_interactive_download: !!user.allow_force_interactive_download,
+        is_admin: !!user.is_admin,
       });
       setNewPassword('');
       setConfirmPassword('');
@@ -74,6 +64,13 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ user, isOp
         delete updates.qbit_api_key;
       }
 
+      // Seul un admin peut changer is_admin ; l'admin principal reste verrouillé
+      if (!currentAdmin?.is_admin) {
+        delete updates.is_admin;
+      } else if (user.username === 'admin') {
+        updates.is_admin = true;
+      }
+
       if (newPassword) {
         if (newPassword !== confirmPassword) {
           throw new Error('Les mots de passe ne correspondent pas');
@@ -90,12 +87,14 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ user, isOp
           ? true
           : !!updatedUser?.has_qbit_api_key,
         allow_force_interactive_download: !!updatedUser?.allow_force_interactive_download,
+        is_admin: !!updatedUser?.is_admin,
       });
 
       if (user.id === currentAdmin?.id) {
         useAuthStore.getState().patchUser({
           allow_force_interactive_download: !!updatedUser?.allow_force_interactive_download,
           qbit_url: updatedUser.qbit_url,
+          is_admin: !!updatedUser?.is_admin,
         });
       }
       
@@ -225,7 +224,33 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ user, isOp
                           Autoriser le forçage des téléchargements
                         </span>
                         <span className="block text-[9px] font-bold text-gray-500 leading-relaxed">
-                          Si un média est déjà en médiathèque, l&apos;utilisateur pourra confirmer un second téléchargement interactif (ex. version plus légère).
+                          Si un média est déjà sur Emby, l&apos;utilisateur pourra confirmer un second téléchargement interactif (ex. version plus légère).
+                        </span>
+                      </div>
+                    </label>
+                  )}
+
+                  {currentAdmin?.is_admin && (
+                    <label
+                      className={`flex items-start gap-4 p-4 rounded-2xl bg-white/5 border border-white/10 transition-all ${
+                        user.username === 'admin' ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer hover:border-white/20'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={settings.is_admin}
+                        disabled={user.username === 'admin'}
+                        onChange={(e) => setSettings({ ...settings, is_admin: e.target.checked })}
+                        className="mt-1 w-4 h-4 rounded border-white/20 bg-white/5 text-blue-600 focus:ring-blue-500/40 disabled:opacity-50"
+                      />
+                      <div className="space-y-1">
+                        <span className="block text-[10px] font-black text-white uppercase tracking-widest">
+                          Privilèges Admin
+                        </span>
+                        <span className="block text-[9px] font-bold text-gray-500 leading-relaxed">
+                          {user.username === 'admin'
+                            ? "L'administrateur principal ne peut pas perdre ses droits."
+                            : "Accès aux paramètres système, utilisateurs et intégrations."}
                         </span>
                       </div>
                     </label>

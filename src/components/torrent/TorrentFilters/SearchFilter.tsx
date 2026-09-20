@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Search, X } from 'lucide-react';
 
 interface SearchFilterProps {
@@ -6,42 +6,43 @@ interface SearchFilterProps {
   onSearchChange: (query: string) => void;
 }
 
-// [DEBUG ONLY] console.log('SearchFilter loaded');
+const DEBOUNCE_MS = 250;
+
 export const SearchFilter: React.FC<SearchFilterProps> = ({
   searchQuery,
-  onSearchChange
+  onSearchChange,
 }) => {
-  // [DEBUG ONLY] console.log('useState initialized with', searchQuery);
   const [localQuery, setLocalQuery] = useState(searchQuery);
+  const onSearchChangeRef = useRef(onSearchChange);
+  onSearchChangeRef.current = onSearchChange;
 
-  // Synchroniser l'état local avec les props
   useEffect(() => {
     setLocalQuery(searchQuery);
   }, [searchQuery]);
 
-  // Gérer la soumission du formulaire
-  // [DEBUG ONLY] console.log('handleSubmit called');
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSearchChange(localQuery);
-  };
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (localQuery !== searchQuery) {
+        onSearchChangeRef.current(localQuery);
+      }
+    }, DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [localQuery, searchQuery]);
 
-  // Effacer la recherche
-  // [DEBUG ONLY] console.log('clearSearch called');
   const clearSearch = () => {
     setLocalQuery('');
     onSearchChange('');
   };
 
   return (
-    <form onSubmit={handleSubmit} className="w-full">
+    <div className="w-full">
       <div className="relative">
         <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-          <Search className="w-4 h-4 text-gray-400" />
+          <Search className="w-4 h-4 text-blue-400/70" />
         </div>
         <input
           type="text"
-          className="block w-full p-2 pl-9 pr-9 bg-gray-800 border-0 rounded-lg text-sm text-white focus:ring-2 focus:ring-blue-500 placeholder-gray-400"
+          className="block w-full p-2.5 pl-9 pr-9 bg-transparent border border-blue-500/20 rounded-xl text-sm text-white placeholder-white/40 focus:outline-none focus:border-blue-500/40 transition-colors"
           placeholder="Rechercher un torrent..."
           value={localQuery}
           onChange={(e) => setLocalQuery(e.target.value)}
@@ -53,10 +54,10 @@ export const SearchFilter: React.FC<SearchFilterProps> = ({
             onClick={clearSearch}
             aria-label="Effacer la recherche"
           >
-            <X className="w-4 h-4 text-gray-400 hover:text-white" />
+            <X className="w-4 h-4 text-white/50 hover:text-white" />
           </button>
         )}
       </div>
-    </form>
+    </div>
   );
 };

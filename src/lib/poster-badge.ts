@@ -17,3 +17,14 @@ export function posterBadgeTitle(badge: PosterBadge): string {
   if (badge.type === 'series_partial') return 'Série incomplète';
   return badge.label;
 }
+
+/** Entrées de légende (accueil Découvrir). */
+export const POSTER_BADGE_LEGEND: Array<{
+  badge: PosterBadge;
+  hint: string;
+}> = [
+  { badge: { type: 'in_library', label: 'En bibliothèque' }, hint: 'Film déjà sur Emby / disque' },
+  { badge: { type: 'series_complete', label: 'Complète' }, hint: 'Série terminée et complète' },
+  { badge: { type: 'series_partial', label: 'Partiel' }, hint: 'Série présente mais incomplète' },
+  { badge: { type: 'requested', label: 'Demandé' }, hint: 'Demande en cours' },
+];

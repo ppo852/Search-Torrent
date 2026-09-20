@@ -470,8 +470,3 @@ export function AdminEmbyInventoryPanel({
     </div>
   );
 }
-
-/** @deprecated Utiliser AdminEmbyConnectionPanel */
-export function AdminEmbyPanel() {
-  return <AdminEmbyConnectionPanel />;
-}

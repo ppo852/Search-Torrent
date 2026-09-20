@@ -118,8 +118,7 @@ class TmdbAPI {
 
   async searchSuggestions(
     query: string,
-    mediaType: 'movie' | 'tv' | 'all' = 'all',
-    _isAnime: boolean = false
+    mediaType: 'movie' | 'tv' | 'all' = 'all'
   ): Promise<TmdbResult[]> {
     return this.searchMultipleTypes(query, mediaType);
   }

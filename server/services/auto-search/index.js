@@ -1,11 +1,9 @@
 import { get, query, run } from '../core/db.js';
-import { getSetting } from '../settings/index.js';
+import { getSetting, resolveMinSeeds } from '../settings/index.js';
 import qBittorrentService from '../qbittorrent/index.js';
 import mediaInventoryService from '../media-inventory/index.js';
 import prowlarrSearchService, { isCompleteSeasonTitle } from '../prowlarr/search.js';
-import { applyQualityProfile } from '../utils/validation.js';
 import {
-  pad2,
   loadAssignedQualityProfile,
   isMovieLikeMediaType
 } from '../utils/helpers.js';
@@ -25,6 +23,7 @@ import {
   insertTvSeasonHistory,
   markTvEpisodeCompleted,
   markTvEpisodeError,
+  resolveTvSeasonInProgressStatus,
   torrentDownloadFields,
   torrentHistoryFields,
   upsertTvEpisodeDownload
@@ -33,12 +32,12 @@ import { inferQbitCategoryFromMediaType } from '../utils/qbit-categories.js';
 import logger from '../core/logger.js';
 
 async function getAutoSearchContext(mediaType) {
-  const minSeedsSetting = await getSetting('min_seeds');
+  const minSeeds = await resolveMinSeeds();
   const profiles = await getSetting('quality_profiles');
   const assignments = await getSetting('quality_profile_assignments');
 
   return {
-    minSeeds: typeof minSeedsSetting === 'number' ? minSeedsSetting : 3,
+    minSeeds,
     profile: loadAssignedQualityProfile(mediaType, profiles, assignments),
     qbitCategory: inferQbitCategoryFromMediaType(mediaType)
   };
@@ -95,7 +94,8 @@ export async function runAutoSearchForTvSeasonEpisodeRequest({ requestId, userId
     }
 
     if (!isEpisodeAiredNow(tmdbEpisode.airDate)) {
-      await run(`UPDATE tv_season_requests SET status = ?, next_episode_number = ?, last_checked_at = ?, last_error = ? WHERE id = ? AND user_id = ?`, ['monitoring', epNum, now, null, requestId, userId]);
+      const waitStatus = await resolveTvSeasonInProgressStatus(requestId);
+      await run(`UPDATE tv_season_requests SET status = ?, next_episode_number = ?, last_checked_at = ?, last_error = ? WHERE id = ? AND user_id = ?`, [waitStatus, epNum, now, null, requestId, userId]);
       return { status: 'not_aired', episode: epNum };
     }
 
@@ -114,7 +114,8 @@ export async function runAutoSearchForTvSeasonEpisodeRequest({ requestId, userId
     const best = results[0] || null;
 
     if (!best) {
-      await run(`UPDATE tv_season_requests SET status = ?, next_episode_number = ?, last_checked_at = ?, last_error = ? WHERE id = ? AND user_id = ?`, ['monitoring', epNum, now, null, requestId, userId]);
+      const waitStatus = await resolveTvSeasonInProgressStatus(requestId);
+      await run(`UPDATE tv_season_requests SET status = ?, next_episode_number = ?, last_checked_at = ?, last_error = ? WHERE id = ? AND user_id = ?`, [waitStatus, epNum, now, null, requestId, userId]);
       return { status: 'no_results', episode: epNum };
     }
 
@@ -144,7 +145,7 @@ export async function runAutoSearchForTvSeasonEpisodeRequest({ requestId, userId
     });
 
     await run(`UPDATE tv_season_requests SET status = ?, next_episode_number = ?, matched_torrent_name = ?, matched_torrent_magnet = ?, matched_torrent_size = ?, matched_torrent_seeds = ?, last_checked_at = ?, last_error = ? WHERE id = ? AND user_id = ?`,
-      ['monitoring', epNum, String(best.name), String(best.link), best.size, best.seeds, now, null, requestId, userId]);
+      ['downloading', epNum, String(best.name), String(best.link), best.size, best.seeds, now, null, requestId, userId]);
 
     return { status: 'sent_episode', episode: epNum, selected: best };
   } catch (error) {
@@ -163,12 +164,37 @@ export async function runAutoSearchForTvSeasonEpisodeRequest({ requestId, userId
 export async function runAutoSearchForRequest({ requestId, userId }) {
   const requestItem = await get(`SELECT * FROM media_requests WHERE id = ? AND user_id = ?`, [requestId, userId]);
   if (!requestItem) return { status: 'not_found' };
-  if (requestItem.status === 'sent_to_qbit') return { status: 'already_sent' };
 
   const now = new Date().toISOString();
+  const year = requestItem.release_date ? Number(String(requestItem.release_date).split('-')[0]) : null;
+  const mediaKind = isMovieLikeMediaType(requestItem.media_type) ? 'movie' : 'tv';
+
+  if (requestItem.status === 'sent_to_qbit') {
+    const present = await mediaInventoryService.isPresent({
+      kind: mediaKind,
+      title: requestItem.title,
+      year,
+      tmdb_id: requestItem.tmdb_id,
+    });
+
+    if (present?.present) {
+      await run(
+        `UPDATE media_requests SET status = ?, last_checked_at = ?, last_error = ? WHERE id = ? AND user_id = ?`,
+        ['already_available', now, null, requestId, userId]
+      );
+      return { status: 'already_available' };
+    }
+
+    return { status: 'already_sent' };
+  }
+
   try {
-    const year = requestItem.release_date ? Number(String(requestItem.release_date).split('-')[0]) : null;
-    const present = await mediaInventoryService.isPresent({ kind: isMovieLikeMediaType(requestItem.media_type) ? 'movie' : 'tv', title: requestItem.title, year: year, tmdb_id: requestItem.tmdb_id });
+    const present = await mediaInventoryService.isPresent({
+      kind: mediaKind,
+      title: requestItem.title,
+      year,
+      tmdb_id: requestItem.tmdb_id,
+    });
 
     if (present?.present) {
       await run(`UPDATE media_requests SET status = ?, last_checked_at = ?, last_error = ? WHERE id = ? AND user_id = ?`, ['already_available', now, null, requestId, userId]);
@@ -177,19 +203,27 @@ export async function runAutoSearchForRequest({ requestId, userId }) {
 
     const { minSeeds, profile, qbitCategory } = await getAutoSearchContext(requestItem.media_type);
 
-    const results = await prowlarrSearchService.searchMovie({
+    const { results, extrasFilteredOnly } = await prowlarrSearchService.searchMovieDetailed({
       title: requestItem.title,
-      year: year,
+      year,
       tmdbId: requestItem.tmdb_id,
+      mediaType: requestItem.media_type,
       minSeeds,
-      qualityProfile: profile
+      qualityProfile: profile,
     });
 
     const best = results[0] || null;
 
     if (!best) {
-      await run(`UPDATE media_requests SET last_checked_at = ?, last_error = ? WHERE id = ? AND user_id = ?`, [now, null, requestId, userId]);
-      return { status: 'no_results' };
+      if (extrasFilteredOnly) {
+        logger.debug('autosearch', 'movie no_results — extras filtered only', { requestId });
+      }
+      // Pas un échec technique : film pas encore dispo sur les indexeurs.
+      await run(
+        `UPDATE media_requests SET last_checked_at = ?, last_error = ?, status = 'pending' WHERE id = ? AND user_id = ?`,
+        [now, null, requestId, userId]
+      );
+      return { status: 'no_results', extras_filtered_only: extrasFilteredOnly };
     }
 
     await qBittorrentService.addTorrentUrlForUser(userId, best.link, { category: qbitCategory, tags: buildQbitTagsString({ requestId }) });
@@ -212,7 +246,12 @@ export async function runAutoSearchForRequest({ requestId, userId }) {
 
 export async function runAutoSearchForTvSeasonRequest({ requestId, userId, reconcileStale = true }) {
   const requestItem = await get(`SELECT * FROM tv_season_requests WHERE id = ? AND user_id = ?`, [requestId, userId]);
-  if (!requestItem || ['sent_to_qbit', 'completed'].includes(requestItem.status)) return { status: 'already_sent' };
+  if (!requestItem || requestItem.status === 'completed') return { status: 'already_sent' };
+
+  if (requestItem.status === 'sent_to_qbit') {
+    await run(`UPDATE tv_season_requests SET status = 'downloading' WHERE id = ? AND user_id = ?`, [requestId, userId]);
+    requestItem.status = 'downloading';
+  }
 
   if (reconcileStale) {
     await reconcileStaleTvEpisodeDownloads({ tvSeasonRequestId: requestId });
@@ -326,7 +365,7 @@ export async function runAutoSearchForTvSeasonRequest({ requestId, userId, recon
       const nextEp = Math.min(...missingEpisodes);
       await run(
         `UPDATE tv_season_requests
-         SET status = 'monitoring', next_episode_number = ?,
+         SET status = 'downloading', next_episode_number = ?,
              matched_torrent_name = ?, matched_torrent_magnet = ?,
              matched_torrent_size = ?, matched_torrent_seeds = ?,
              last_checked_at = ?, last_error = ?
@@ -399,11 +438,19 @@ export async function runAutoSearchForTvSeasonRequest({ requestId, userId, recon
       }
     }
 
-    await run(`UPDATE tv_season_requests SET last_checked_at = ? WHERE id = ? AND user_id = ?`, [now, requestId, userId]);
     if (downloaded.length > 0) {
+      const waitStatus = await resolveTvSeasonInProgressStatus(requestId);
+      const stillMissing = missingEpisodes.filter((ep) => !downloaded.includes(ep));
+      const nextEp = stillMissing.length > 0 ? Math.min(...stillMissing) : Math.min(...downloaded);
+      await run(
+        `UPDATE tv_season_requests SET status = ?, next_episode_number = ?, last_checked_at = ?, last_error = ? WHERE id = ? AND user_id = ?`,
+        [waitStatus, nextEp, now, null, requestId, userId]
+      );
       logger.info(`[AutoSearch] Scan terminé pour "${requestItem.title}" S${requestItem.season_number}. Résultat: ${downloaded.length} épisode(s) envoyé(s).`);
       return { status: 'sent_batch', downloadedCount: downloaded.length };
     }
+
+    await run(`UPDATE tv_season_requests SET last_checked_at = ? WHERE id = ? AND user_id = ?`, [now, requestId, userId]);
     if (skippedInQbit.length > 0) {
       return { status: 'already_in_qbit', episodes: skippedInQbit };
     }
@@ -427,7 +474,7 @@ export async function runAutoSearchOnce() {
   await reconcileStaleTvEpisodeDownloads();
 
   const pending = await query(`SELECT id, user_id FROM media_requests WHERE status IN ('pending','error') LIMIT 50`);
-  const tvMonitoring = await query(`SELECT id, user_id FROM tv_season_requests WHERE status IN ('monitoring','error') LIMIT 50`);
+  const tvMonitoring = await query(`SELECT id, user_id FROM tv_season_requests WHERE status IN ('monitoring','downloading','error','sent_to_qbit') LIMIT 50`);
 
   for (const row of pending || []) await runAutoSearchForRequest({ requestId: row.id, userId: row.user_id });
   for (const row of tvMonitoring || []) {

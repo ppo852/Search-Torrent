@@ -50,10 +50,10 @@ export function ResultCard({
   };
 
   return (
-    <div className={`glass-card p-4 group transition-all duration-300 hover:scale-[1.01] hover:shadow-blue-500/5 ${
+    <div className={`soft-card-interactive p-4 group ${
       validationError 
-        ? 'border-red-500/20 bg-red-500/[0.02] opacity-60 hover:opacity-100 grayscale-[0.3] hover:grayscale-0' 
-        : 'hover:bg-white/5 border-white/5'
+        ? 'border-red-500/20 bg-red-500/[0.02] opacity-60 hover:opacity-100 grayscale-[0.3] hover:grayscale-0'
+        : ''
     }`}>
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
         <div className="flex gap-4 flex-1 min-w-0">
@@ -96,7 +96,7 @@ export function ResultCard({
                 {result.leech} <span className="hidden sm:inline opacity-50 font-medium">leech</span>
               </div>
 
-              <div className="text-[9px] md:text-[10px] text-gray-500 font-bold uppercase tracking-widest flex items-center gap-1">
+              <div className="text-[9px] md:text-[10px] text-blue-400/55 font-bold uppercase tracking-widest flex items-center gap-1">
                 <CalendarDays size={10} />
                 {result.publishDate ? formatDate(result.publishDate) : '—'}
               </div>
@@ -107,7 +107,7 @@ export function ResultCard({
               </div>
 
               {hostname && (
-                <div className="text-[9px] md:text-[10px] text-gray-600 font-black uppercase tracking-tighter">
+                <div className="text-[9px] md:text-[10px] text-blue-400/40 font-black uppercase tracking-tighter">
                   {hostname}
                 </div>
               )}
@@ -119,7 +119,7 @@ export function ResultCard({
           {onTrack && (
             <button
               onClick={() => onTrack()}
-              className="flex-1 md:w-40 flex items-center justify-center gap-2 px-4 py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-all font-bold border border-white/5"
+              className="flex-1 md:w-40 flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600/10 hover:bg-blue-600/20 text-white rounded-xl transition-all font-bold border border-blue-500/20"
             >
               <BookmarkPlus size={18} className="text-blue-400" />
               <span>Suivre</span>
@@ -129,7 +129,7 @@ export function ResultCard({
             onClick={handleDownloadClick}
             disabled={isDownloading}
             className={`flex-1 md:w-40 flex items-center justify-center gap-2 px-4 py-2.5 ${
-              validationError ? 'bg-gray-800 hover:bg-red-600 text-gray-400 hover:text-white' : 'premium-gradient text-white shadow-blue-600/20'
+              validationError ? 'bg-blue-600/5 border border-red-500/30 hover:bg-red-600 text-blue-400/50 hover:text-white' : 'premium-gradient text-white shadow-blue-600/20'
             } rounded-xl shadow-lg hover:scale-[1.03] active:scale-[0.97] transition-all font-black uppercase tracking-widest text-xs disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             {isDownloading ? (

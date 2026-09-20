@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { MediaCard } from './MediaCard';
 import type { TmdbResult } from '../../types';
@@ -9,9 +10,19 @@ interface MediaSectionProps {
   items: TmdbResult[];
   onMediaClick: (media: TmdbResult) => void;
   getPosterBadges?: (media: TmdbResult) => PosterBadge | PosterBadge[] | null | undefined;
+  /** Lien « Voir plus » (accueil TMDB / RSS à télécharger). */
+  seeMoreTo?: string;
+  seeMoreLabel?: string;
 }
 
-export function MediaSection({ title, items, onMediaClick, getPosterBadges }: MediaSectionProps) {
+export function MediaSection({
+  title,
+  items,
+  onMediaClick,
+  getPosterBadges,
+  seeMoreTo,
+  seeMoreLabel = 'Voir plus',
+}: MediaSectionProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const scroll = (direction: 'left' | 'right') => {
@@ -23,9 +34,20 @@ export function MediaSection({ title, items, onMediaClick, getPosterBadges }: Me
 
   return (
     <section className="mb-12 relative group">
-      <h2 className="text-xl font-bold text-white mb-6 pl-4 relative before:content-[''] before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-1 before:h-6 before:bg-gradient-to-b before:from-blue-500 before:to-purple-600 before:rounded">
-        {title}
-      </h2>
+      <div className="flex items-center justify-between gap-4 mb-6 pl-4 pr-4">
+        <h2 className="text-xl font-bold text-white relative before:content-[''] before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-1 before:h-6 before:bg-gradient-to-b before:from-blue-500 before:to-purple-600 before:rounded pl-4">
+          {title}
+        </h2>
+        {seeMoreTo && (
+          <Link
+            to={seeMoreTo}
+            className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-blue-400 hover:text-blue-300 transition-colors"
+          >
+            {seeMoreLabel}
+            <ChevronRight size={14} />
+          </Link>
+        )}
+      </div>
       <button
         onClick={() => scroll('left')}
         className="absolute left-0 top-1/2 -translate-y-1/2 z-10 bg-black/80 hover:bg-black text-white p-2 rounded-full md:opacity-0 md:group-hover:opacity-100 transition-opacity"

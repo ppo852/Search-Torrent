@@ -5,7 +5,9 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { getRequestStatusBadge, aggregateSeasonStatuses } from '../lib/request-status-labels';
 import { EmptyState } from '../components/ui/EmptyState';
+import { RequestStatusLegend } from '../components/ui/RequestStatusLegend';
 import { showErrorToast, showToast } from '../stores/toastStore';
+import { TvSeasonRequest } from '../types';
 
 interface LibraryItem {
   id: string;
@@ -18,20 +20,6 @@ interface LibraryItem {
   monitored: boolean;
   created_at: string;
   status?: string;
-  requested_by?: string | null;
-}
-
-interface TvSeasonRequest {
-  id: string;
-  user_id: string;
-  tmdb_id: number;
-  media_type: 'tv' | 'anime';
-  title: string;
-  poster_url: string | null;
-  season_number: number;
-  status: string;
-  next_episode_number: number;
-  created_at: string;
   requested_by?: string | null;
 }
 
@@ -140,8 +128,8 @@ export function LibraryPage() {
     return true;
   });
 
-  const renderStatusBadge = (status?: string) => {
-    const badge = getRequestStatusBadge(status);
+  const renderStatusBadge = (status?: string, mediaType?: string) => {
+    const badge = getRequestStatusBadge(status, mediaType);
     return (
       <span className={`inline-block max-w-full px-2 py-0.5 rounded-lg border text-[9px] font-black uppercase tracking-widest truncate ${badge.className}`}>
         {badge.label}
@@ -185,7 +173,7 @@ export function LibraryPage() {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/5 pb-8">
+      <div className="flex flex-wrap items-center justify-between gap-4 pb-2">
         <div className="relative group flex-1 min-w-[280px] max-w-2xl">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-blue-500 transition-colors" size={18} />
           <input
@@ -237,6 +225,16 @@ export function LibraryPage() {
         </div>
       </div>
 
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg md:text-xl font-bold text-white">Gérer vos demandes</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Suivi des films, séries et animes demandés
+          </p>
+        </div>
+        <RequestStatusLegend />
+      </div>
+
       {error && <div className="p-6 bg-red-600/10 border border-red-600/20 rounded-2xl text-red-400 font-bold text-center uppercase tracking-widest text-xs">{error}</div>}
 
       {filteredItems.length === 0 ? (
@@ -284,7 +282,7 @@ export function LibraryPage() {
                     </div>
 
                     <div className="absolute top-3 right-3 max-w-[48%] flex justify-end">
-                      {renderStatusBadge(item.kind === 'media_request' ? item.status : item.status)}
+                      {renderStatusBadge(item.status, item.media_type)}
                     </div>
 
                     <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/20 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col justify-end p-5">
@@ -334,7 +332,7 @@ export function LibraryPage() {
                   <span className="px-2 py-0.5 bg-blue-600/10 border border-blue-600/20 rounded-lg text-[9px] text-blue-400 uppercase font-black tracking-widest">
                     {item.media_type}
                   </span>
-                  {renderStatusBadge(item.kind === 'media_request' ? item.status : item.status)}
+                  {renderStatusBadge(item.status, item.media_type)}
                 </div>
                 
                 <div className="flex flex-wrap items-center gap-x-8 gap-y-2 text-[10px] font-black text-gray-600 uppercase tracking-widest">

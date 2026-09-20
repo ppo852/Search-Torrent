@@ -12,6 +12,10 @@ interface GlobalSettings {
   emby_api_key?: string;
   emby_library_ids?: string[];
   emby_sync_interval_minutes?: number;
+  calendar_api_key?: string;
+  organizr_sso_enabled?: boolean | string;
+  organizr_url?: string;
+  organizr_auth_group?: string;
   min_seeds: number;
   auto_search_interval_minutes: number;
   media_scan_interval_minutes: number;
@@ -20,7 +24,7 @@ interface GlobalSettings {
 
 class GlobalSettingsManager {
   private settings: Partial<GlobalSettings> = {
-    min_seeds: 3,
+    min_seeds: 0,
     auto_search_interval_minutes: 60,
     media_scan_interval_minutes: 30,
     media_requests_auto_delete_completed_after_hours: 24
@@ -63,7 +67,7 @@ class GlobalSettingsManager {
   }
 
   getMinSeeds(): number {
-    return this.settings.min_seeds ?? 3;
+    return this.settings.min_seeds ?? 0;
   }
 
   async updateSettings(settings: Partial<GlobalSettings>): Promise<void> {

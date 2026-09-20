@@ -5,24 +5,22 @@ import qBittorrentService from '../../services/qbittorrent/index.js';
 import autoSearchService from '../../services/auto-search/index.js';
 import mediaInventoryService from '../../services/media-inventory/index.js';
 import prowlarrSearchService, {
-  getProwlarrCategoryId,
   isCompleteSeasonTitle
 } from '../../services/prowlarr/search.js';
+import { isEpisodeTorrentTitle } from '../../services/utils/episode-title.js';
 import tmdbService from '../../services/tmdb/index.js';
 import logger from '../../services/core/logger.js';
-import {
-  flattenKeywords,
-  titleContainsAny
-} from '../../services/utils/keywords.js';
 import { getResultCompatibility } from '../../services/utils/validation.js';
 import { loadAssignedQualityProfile, isMovieLikeMediaType } from '../../services/utils/helpers.js';
 import { reconcileStaleTvEpisodeDownloads } from '../../services/media-inventory/episode-status.js';
 import { buildQbitTagsString } from '../../services/tv-season/qbit-tags.js';
-import { insertTvSeasonHistory, markTvEpisodeCompleted, markTvEpisodeError, markTvSeasonRequestCompleted, upsertTvEpisodeDownload, torrentDownloadFields } from '../../services/tv-season/downloads.js';
+import { insertTvSeasonHistory, markTvEpisodeCompleted, markTvEpisodeError, upsertTvEpisodeDownload, torrentDownloadFields } from '../../services/tv-season/downloads.js';
+import { tryMarkTvSeasonCompleted } from '../../services/tv-season/completion.js';
 import { inferQbitCategoryFromMediaType } from '../../services/utils/qbit-categories.js';
 import { logActivity } from '../../services/activity-log/index.js';
-import { isSeasonFullyPresent, canUserForceInteractiveDownload } from '../../services/qbittorrent/inventory-guard.js';
+import { checkInteractiveInventoryDuplicate } from '../../services/qbittorrent/inventory-guard.js';
 import { ensureEmbySchema } from '../../services/emby/store.js';
+import { clearCalendarCache } from '../../services/calendar/index.js';
 import {
   getTvShowInventoryMeta,
   getSeasonTotalEpisodeCount,
@@ -229,19 +227,31 @@ export async function getTvSeasonPresenceHandler(req, res) {
     const nextMissing = (missing.length > 0)
       ? Math.min(...missing)
       : (episodeNumbers.length > 0 ? Math.max(...episodeNumbers) + 1 : 1);
-    const nextStatus = (missing.length > 0 || downloading.length > 0) ? 'monitoring' : 'completed';
+    const hasProgress = present.length > 0 || downloading.length > 0 || completedEpisodes.size > 0;
     const now = new Date().toISOString();
+    const canAttemptComplete =
+      missing.length === 0 && downloading.length === 0 && errorEpisodes.length === 0;
+
+    let nextStatus;
+    if (canAttemptComplete) {
+      const marked = await tryMarkTvSeasonCompleted(season, now);
+      nextStatus = marked ? 'completed' : (hasProgress ? 'downloading' : 'monitoring');
+    } else {
+      nextStatus =
+        hasProgress || errorEpisodes.length > 0 || downloading.length > 0
+          ? 'downloading'
+          : 'monitoring';
+    }
+
     try {
       await run(
         `UPDATE tv_season_requests
-         SET next_episode_number = ?, last_checked_at = ?, last_error = ?
+         SET next_episode_number = ?, last_checked_at = ?
          WHERE id = ?`,
-        [nextMissing, now, null, id]
+        [nextMissing, now, id]
       );
-      if (nextStatus === 'completed') {
-        await markTvSeasonRequestCompleted({ requestId: id, completedAt: now });
-      } else {
-        await run(`UPDATE tv_season_requests SET status = ? WHERE id = ?`, ['monitoring', id]);
+      if (nextStatus !== 'completed') {
+        await run(`UPDATE tv_season_requests SET status = ? WHERE id = ?`, [nextStatus, id]);
       }
     } catch {
       // ignore
@@ -264,37 +274,10 @@ export async function getTvSeasonPresenceHandler(req, res) {
   }
 }
 
-// Supprimé au profit de tmdbService.getSeasonEpisodes
-
-
 function canManageRequest(req, request) {
   if (!request) return false;
   if (req.user?.is_admin) return true;
   return request.user_id === req.user?.id;
-}
-
-function pad2(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return '00';
-  return String(v).padStart(2, '0');
-}
-
-function buildEpisodeToken(seasonNumber, episodeNumber) {
-  return `S${pad2(seasonNumber)}E${pad2(episodeNumber)}`;
-}
-
-function buildSeasonToken(seasonNumber) {
-  return `S${pad2(seasonNumber)}`;
-}
-
-function buildEpisodeMatchRegex(seasonNumber, episodeNumber) {
-  const s = Number(seasonNumber);
-  const e = Number(episodeNumber);
-  if (!Number.isFinite(s) || !Number.isFinite(e)) return null;
-
-  const sStr = String(s);
-  const eStr = String(e);
-  return new RegExp(`(?:S0*${sStr}E0*${eStr}|${sStr}x0*${eStr})`, 'i');
 }
 
 const REQUEST_STATUS_TTL_MS = 25_000;
@@ -462,13 +445,16 @@ export async function searchTvSeasonRequestEpisodeHandler(req, res) {
       return res.status(403).json({ error: 'Action non autorisée' });
     }
 
+    // Recherche manuelle : afficher tous les seeds (l'utilisateur choisit).
+    const minSeeds = 0;
+
     const results = await prowlarrSearchService.searchTvEpisode({
       title: requestItem.title,
       seasonNumber: requestItem.season_number,
       episodeNumber: targetEpisodeNumber,
       tmdbId: requestItem.tmdb_id,
       mediaType: requestItem.media_type,
-      minSeeds: 0 // On veut tout voir en manuel
+      minSeeds
     });
 
     const profiles = await getSetting('quality_profiles');
@@ -526,12 +512,15 @@ export async function searchTvSeasonRequestHandler(req, res) {
     const episodes = await tmdbService.getSeasonEpisodes(requestItem.tmdb_id, requestItem.season_number);
     const episodeCount = (episodes || []).length || 1;
 
+    // Recherche manuelle : afficher tous les seeds (l'utilisateur choisit).
+    const minSeeds = 0;
+
     const results = await prowlarrSearchService.searchTvSeries({
       title: requestItem.title,
       tmdbId: requestItem.tmdb_id,
       mediaType: requestItem.media_type,
       seasonNumber: requestItem.season_number,
-      minSeeds: 0, // On veut tout voir en manuel
+      minSeeds,
       episodeCount
     });
 
@@ -661,36 +650,24 @@ export async function sendToQbitTvSeasonRequestHandler(req, res) {
       return res.status(400).json({ error: 'Aucun torrent sélectionné. Lancez une recherche d\'abord.' });
     }
 
-    let alreadyPresent = false;
-    if (targetEpisodeNumber !== null) {
-      const presence = await mediaInventoryService.isPresent({
-        kind: 'tv',
-        title: requestItem.title,
-        season: requestItem.season_number,
-        episode: targetEpisodeNumber,
-        tmdb_id: requestItem.tmdb_id,
-      });
-      alreadyPresent = !!presence?.present;
-    } else {
-      alreadyPresent = await isSeasonFullyPresent({
-        tmdbId: requestItem.tmdb_id,
-        title: requestItem.title,
-        season: requestItem.season_number,
-      });
-    }
+    const inventoryCheck = await checkInteractiveInventoryDuplicate({
+      torrentName: requestItem.matched_torrent_name || requestItem.title,
+      title: requestItem.title,
+      force,
+      userId: req.user.id,
+      tmdbId: requestItem.tmdb_id,
+      mediaType: requestItem.media_type || 'tv',
+      seasonNumber: requestItem.season_number,
+      episodeNumber: targetEpisodeNumber,
+    });
 
-    if (alreadyPresent && !force) {
-      return res.status(409).json({
-        error: 'Déjà présent dans la médiathèque',
-        present: true,
+    if (inventoryCheck.blocked) {
+      return res.status(inventoryCheck.status || 409).json({
+        error: inventoryCheck.error,
+        details: inventoryCheck.details,
+        present: inventoryCheck.present === true,
+        matches: inventoryCheck.matches || [],
       });
-    }
-
-    if (alreadyPresent && force) {
-      const forceCheck = await canUserForceInteractiveDownload(req.user.id, true);
-      if (!forceCheck.allowed) {
-        return res.status(forceCheck.status || 403).json({ error: forceCheck.error });
-      }
     }
 
     const category = inferQbitCategoryFromMediaType(requestItem.media_type) || 'Séries';
@@ -723,9 +700,11 @@ export async function sendToQbitTvSeasonRequestHandler(req, res) {
       createdAt: now
     });
 
-    const episodeToken = buildEpisodeToken(requestItem.season_number, tokenEpisodeNumber);
-    const episodeRegex = new RegExp(episodeToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    const isEpisodeMatch = episodeRegex.test(String(requestItem.matched_torrent_name || ''));
+    const isEpisodeMatch = isEpisodeTorrentTitle(
+      requestItem.matched_torrent_name,
+      requestItem.season_number,
+      tokenEpisodeNumber
+    );
     const isComplete = isCompleteSeasonTitle(requestItem.matched_torrent_name);
 
     const torrentPayload = torrentDownloadFields({
@@ -773,21 +752,14 @@ export async function sendToQbitTvSeasonRequestHandler(req, res) {
          SET status = ?, next_episode_number = ?,
              last_checked_at = ?, last_error = ?
          WHERE id = ?`,
-        ['monitoring', bumpTo, now, null, id]
-      );
-    } else if (isComplete) {
-      await run(
-        `UPDATE tv_season_requests
-         SET status = ?, last_checked_at = ?, last_error = ?
-         WHERE id = ?`,
-        ['monitoring', now, null, id]
+        ['downloading', bumpTo, now, null, id]
       );
     } else {
       await run(
         `UPDATE tv_season_requests
          SET status = ?, last_checked_at = ?, last_error = ?
          WHERE id = ?`,
-        ['sent_to_qbit', now, null, id]
+        ['downloading', now, null, id]
       );
     }
 
@@ -1118,7 +1090,7 @@ export async function createTvSeasonRequestsHandler(req, res) {
 
     if (created.length === 0 && (conflicts.length > 0 || presentConflicts.length > 0)) {
       return res.status(409).json({
-        error: presentConflicts.length > 0 ? 'Déjà présent dans la médiathèque' : 'Déjà demandé',
+        error: presentConflicts.length > 0 ? 'Déjà présent dans Emby' : 'Déjà demandé',
         existing: conflicts[0] || presentConflicts[0],
         conflicts,
         present_conflicts: presentConflicts
@@ -1128,6 +1100,7 @@ export async function createTvSeasonRequestsHandler(req, res) {
     res.status(201).json({ created, conflicts });
 
     invalidateRequestStatusCache();
+    if (created.length > 0) clearCalendarCache();
 
     for (const item of created) {
       await logActivity({
@@ -1195,6 +1168,7 @@ export async function deleteTvSeasonRequestHandler(req, res) {
 
     if (result && result.changes > 0) {
       invalidateRequestStatusCache();
+      clearCalendarCache();
       await logActivity({
         eventType: 'request.tv_season_deleted',
         actorUsername: actorName(req),
@@ -1230,11 +1204,11 @@ export async function searchLibraryItemHandler(req, res) {
       return res.status(403).json({ error: 'Action non autorisée' });
     }
 
-    const minSeedsSetting = await getSetting('min_seeds');
+    // Recherche manuelle : afficher tous les seeds (l'utilisateur choisit).
+    const minSeeds = 0;
     const profiles = await getSetting('quality_profiles');
     const assignments = await getSetting('quality_profile_assignments');
 
-    const minSeeds = typeof minSeedsSetting === 'number' ? minSeedsSetting : 3;
     const year = requestItem.release_date ? String(requestItem.release_date).split('-')[0] : '';
 
     // Use centralized search service
@@ -1242,8 +1216,8 @@ export async function searchLibraryItemHandler(req, res) {
       title: requestItem.title,
       year,
       tmdbId: requestItem.tmdb_id,
-      minSeeds: 0, // En manuel, on veut tout voir
-      filterByRelevance: true
+      mediaType: requestItem.media_type,
+      minSeeds,
     };
 
     const searchResults = isMovieLikeMediaType(requestItem.media_type)
@@ -1414,7 +1388,7 @@ export async function sendToQbitLibraryItemHandler(req, res) {
     const force = !!req.body?.force;
 
     const requestItem = await get(
-      `SELECT id, user_id, tmdb_id, title, media_type, release_date, matched_torrent_magnet
+      `SELECT id, user_id, tmdb_id, title, media_type, release_date, matched_torrent_name, matched_torrent_magnet
        FROM media_requests
        WHERE id = ?`,
       [id]
@@ -1433,26 +1407,23 @@ export async function sendToQbitLibraryItemHandler(req, res) {
     }
 
     const year = requestItem.release_date ? Number(String(requestItem.release_date).split('-')[0]) : null;
-    const presence = await mediaInventoryService.isPresent({
-      kind: isMovieLikeMediaType(requestItem.media_type) ? 'movie' : 'tv',
+    const inventoryCheck = await checkInteractiveInventoryDuplicate({
+      torrentName: requestItem.matched_torrent_name || requestItem.title,
       title: requestItem.title,
       year: Number.isInteger(year) ? year : null,
-      tmdb_id: requestItem.tmdb_id ?? null,
+      force,
+      userId: req.user.id,
+      tmdbId: requestItem.tmdb_id,
+      mediaType: requestItem.media_type,
     });
 
-    if (presence?.present && !force) {
-      return res.status(409).json({
-        error: 'Déjà présent dans la médiathèque',
-        present: true,
-        matches: presence.matches || []
+    if (inventoryCheck.blocked) {
+      return res.status(inventoryCheck.status || 409).json({
+        error: inventoryCheck.error,
+        details: inventoryCheck.details,
+        present: inventoryCheck.present === true,
+        matches: inventoryCheck.matches || [],
       });
-    }
-
-    if (presence?.present && force) {
-      const forceCheck = await canUserForceInteractiveDownload(req.user.id, true);
-      if (!forceCheck.allowed) {
-        return res.status(forceCheck.status || 403).json({ error: forceCheck.error });
-      }
     }
 
     const category = inferQbitCategoryFromMediaType(requestItem.media_type) || 'Autres';
@@ -1538,10 +1509,10 @@ export async function createLibraryItemHandler(req, res) {
       });
       if (presence?.present) {
         return res.status(409).json({
-          error: 'Déjà présent dans la médiathèque',
+          error: 'Déjà présent dans Emby',
           present: true,
           matches: presence.matches || [],
-          messages: ['Déjà présent dans la médiathèque']
+          messages: ['Déjà présent dans Emby']
         });
       }
     } catch {

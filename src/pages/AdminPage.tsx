@@ -1,28 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Trash2, Settings, Users, Rss, SlidersHorizontal, HardDrive, Activity, Shield, Cpu, Key, Database, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Trash2, Settings, Users, Rss, SlidersHorizontal, HardDrive, Activity, Shield, Cpu, Key, Database, RefreshCw, CheckCircle2, Calendar, Copy } from 'lucide-react';
 import { getActivityEventLabel, formatActivityDetails } from '../lib/activity-log-labels';
 import { useAuthStore } from '../stores/authStore';
 import { api } from '../services/api';
 import { UserSettingsModal } from '../components/settings/UserSettingsModal';
 import { AdminEmbyConnectionPanel, AdminEmbyInventoryPanel } from '../components/settings/AdminEmbyPanel';
+import { AdminOrganizrPanel } from '../components/settings/AdminOrganizrPanel';
 import { AdminRssFeedManager } from '../components/rss/AdminRssFeedManager';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { globalSettings } from '../services/settings';
 import { showErrorToast, showInfoToast, showToast } from '../stores/toastStore';
-
-interface User {
-  id: string;
-  username: string;
-  is_admin: boolean;
-  created_at: string;
-  qbit_url?: string;
-  has_qbit_api_key?: boolean;
-  download_path_movies?: string;
-  download_path_series?: string;
-  download_path_anime?: string;
-  download_path_animation?: string;
-  allow_force_interactive_download?: boolean;
-}
+import type { AdminUser } from '../types';
 
 type QualitySortBy = 'seeds_desc' | 'size_asc' | 'size_desc' | 'date_desc' | 'date_asc';
 
@@ -78,18 +66,19 @@ function ProfileAssignSelect({
 export function AdminPage() {
   const currentUser = useAuthStore((state) => state.user);
   const [activeTab, setActiveTab] = useState('system');
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
   const [newUser, setNewUser] = useState({ username: '', password: '', is_admin: false });
   const [globalConfig, setGlobalConfig] = useState({
     prowlarr_url: '',
     prowlarr_api_key: '',
     tmdb_access_token: '',
-    min_seeds: 3,
+    min_seeds: 0,
     auto_search_interval_minutes: 60,
     media_scan_interval_minutes: 30,
-    media_requests_auto_delete_completed_after_hours: 24
+    media_requests_auto_delete_completed_after_hours: 24,
+    calendar_api_key: ''
   });
   const [autoSearchIntervalInput, setAutoSearchIntervalInput] = useState<string>('60');
   const [mediaScanIntervalInput, setMediaScanIntervalInput] = useState<string>('30');
@@ -100,6 +89,7 @@ export function AdminPage() {
   const [isSavingProwlarr, setIsSavingProwlarr] = useState(false);
   const [isSavingTmdb, setIsSavingTmdb] = useState(false);
   const [isSavingAutomation, setIsSavingAutomation] = useState(false);
+  const [isSavingCalendar, setIsSavingCalendar] = useState(false);
   const [prowlarrLabel, setProwlarrLabel] = useState<string | null>(null);
   const [tmdbLabel, setTmdbLabel] = useState<string | null>(null);
   const [qualityProfiles, setQualityProfiles] = useState<QualityProfile[]>([]);
@@ -111,7 +101,6 @@ export function AdminPage() {
   });
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
   const [newProfileName, setNewProfileName] = useState<string>('');
-  const [mediaInventoryScanStatus, setMediaInventoryScanStatus] = useState<any>(null);
   const [activeScanMode, setActiveScanMode] = useState<'quick' | 'full' | null>(null);
   const [confirmConfig, setConfirmConfig] = useState<{
     isOpen: boolean;
@@ -143,7 +132,6 @@ export function AdminPage() {
         const data = await api.getMediaInventoryScanStatus();
         if (cancelled) return;
         const status = data?.status ?? null;
-        setMediaInventoryScanStatus(status);
         const running = Boolean(status?.running);
         if (wasScanRunning.current && !running) {
           if (status?.lastError) {
@@ -177,10 +165,11 @@ export function AdminPage() {
           prowlarr_url: settings.prowlarr_url || '',
           prowlarr_api_key: settings.prowlarr_api_key || '',
           tmdb_access_token: settings.tmdb_access_token || '',
-          min_seeds: (settings as any).min_seeds ?? 3,
+          min_seeds: (settings as any).min_seeds ?? 0,
           auto_search_interval_minutes: intervalValue,
           media_scan_interval_minutes: mediaIntervalValue,
-          media_requests_auto_delete_completed_after_hours: autoDeleteHoursValue
+          media_requests_auto_delete_completed_after_hours: autoDeleteHoursValue,
+          calendar_api_key: (settings as any).calendar_api_key || ''
         });
         setAutoSearchIntervalInput(String(intervalValue));
         setMediaScanIntervalInput(String(mediaIntervalValue));
@@ -247,6 +236,39 @@ export function AdminPage() {
       showErrorToast('Échec de sauvegarde TMDB');
     } finally {
       setIsSavingTmdb(false);
+    }
+  };
+
+  const buildCalendarIcsUrl = (token: string) => {
+    if (!token) return '';
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    return `${origin}/api/calendar.ics?token=${encodeURIComponent(token)}`;
+  };
+
+  const handleGenerateCalendarKey = async () => {
+    try {
+      setIsSavingCalendar(true);
+      const data = await api.generateCalendarApiKey();
+      setGlobalConfig((prev) => ({ ...prev, calendar_api_key: data.calendar_api_key || '' }));
+      showToast('Clé calendrier générée');
+    } catch {
+      showErrorToast('Échec de génération de la clé calendrier');
+    } finally {
+      setIsSavingCalendar(false);
+    }
+  };
+
+  const handleCopyCalendarUrl = async () => {
+    const url = buildCalendarIcsUrl(globalConfig.calendar_api_key);
+    if (!url) {
+      showErrorToast('Génère d’abord une clé calendrier');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      showToast('URL iCal copiée');
+    } catch {
+      showInfoToast(url);
     }
   };
 
@@ -450,7 +472,7 @@ export function AdminPage() {
           <div className="space-y-8">
             <div className="glass-card p-8 border-white/10 shadow-2xl bg-gray-950/40">
               <h3 className="text-xl font-black text-white uppercase tracking-tighter mb-8 flex items-center gap-3">
-                <Key className="text-blue-500" size={20} /> Provisionnement
+                <Key className="text-blue-500" size={20} /> Création d'utilisateur
               </h3>
               <form onSubmit={handleAddUser} className="space-y-6">
                 <div className="space-y-2">
@@ -563,6 +585,65 @@ export function AdminPage() {
           </div>
 
           <AdminEmbyConnectionPanel />
+
+          <AdminOrganizrPanel />
+
+          <div className="glass-card p-8 space-y-8 border-white/5">
+            <h3 className="text-xl font-black text-white flex items-center gap-4 uppercase tracking-tighter">
+              <Calendar className="text-sky-400" size={24} /> Calendrier Organizr (iCal)
+            </h3>
+            <p className="text-[11px] text-gray-500 font-medium normal-case tracking-normal">
+              Lien secret pour afficher les sorties des séries et animes demandés (en cours) dans le calendrier Organizr.
+              Colle l’URL dans Homepage Items → iCal.
+            </p>
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <label className="block text-[10px] font-black text-gray-600 uppercase tracking-widest ml-1">Clé API calendrier</label>
+                <input
+                  type="password"
+                  readOnly
+                  value={globalConfig.calendar_api_key}
+                  placeholder="Non générée"
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white focus:ring-2 focus:ring-sky-500/40 transition-all"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-[10px] font-black text-gray-600 uppercase tracking-widest ml-1">URL iCal (à coller dans Organizr)</label>
+                <input
+                  type="text"
+                  readOnly
+                  value={buildCalendarIcsUrl(globalConfig.calendar_api_key)}
+                  placeholder="Génère une clé pour obtenir l’URL"
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white text-xs tracking-wide focus:ring-2 focus:ring-sky-500/40 transition-all"
+                />
+              </div>
+              <div className="flex flex-wrap gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleGenerateCalendarKey}
+                  disabled={isSavingCalendar}
+                  className="px-5 py-3 bg-sky-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-sky-500 transition-all disabled:opacity-50 flex items-center gap-2"
+                >
+                  <Key size={14} />
+                  {isSavingCalendar ? 'Génération…' : globalConfig.calendar_api_key ? 'Régénérer la clé' : 'Générer la clé'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyCalendarUrl}
+                  disabled={!globalConfig.calendar_api_key}
+                  className="px-5 py-3 bg-white/5 border border-white/10 text-gray-300 hover:bg-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-40 flex items-center gap-2"
+                >
+                  <Copy size={14} />
+                  Copier l’URL
+                </button>
+              </div>
+              {globalConfig.calendar_api_key && (
+                <p className="text-[10px] font-black text-amber-400/90 uppercase tracking-widest">
+                  Régénérer invalide l’ancienne URL Organizr — recolle la nouvelle.
+                </p>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

@@ -23,11 +23,12 @@ test('checkInteractiveInventoryDuplicate — doublon détecté (409)', async () 
 
   await ensureInventorySchema();
 
+  const pathSuffix = randomUUID();
   await run(
     `INSERT INTO local_media_inventory (
       id, media_kind, title, title_normalized, year, path, last_seen_at
-    ) VALUES (?, 'movie', 'Matrix 1999', 'matrix', 1999, '/media/movies/matrix.mkv', datetime('now'))`,
-    [randomUUID()]
+    ) VALUES (?, 'movie', 'Matrix 1999', 'matrix', 1999, ?, datetime('now'))`,
+    [randomUUID(), `/media/movies/matrix-${pathSuffix}.mkv`]
   );
 
   const result = await checkInteractiveInventoryDuplicate({
@@ -38,7 +39,38 @@ test('checkInteractiveInventoryDuplicate — doublon détecté (409)', async () 
 
   assert.equal(result.blocked, true);
   assert.equal(result.status, 409);
+  assert.equal(result.present, true);
   assert.match(result.error, /Déjà présent/);
+});
+
+test('checkInteractiveInventoryDuplicate — title/year demande (sans nom torrent)', async () => {
+  const app = await getTestApp();
+  const { user } = await loginAsAdmin(app);
+
+  await ensureInventorySchema();
+
+  const tmdbId = 603;
+  const pathSuffix = randomUUID();
+  await run(
+    `INSERT INTO local_media_inventory (
+      id, media_kind, title, title_normalized, year, path, tmdb_id, last_seen_at
+    ) VALUES (?, 'movie', 'The Matrix', 'the matrix', 1999, ?, ?, datetime('now'))`,
+    [randomUUID(), `/media/movies/matrix-tmdb-${pathSuffix}.mkv`, tmdbId]
+  );
+
+  const result = await checkInteractiveInventoryDuplicate({
+    torrentName: '',
+    title: 'The Matrix',
+    year: 1999,
+    force: false,
+    userId: user.id,
+    mediaType: 'movie',
+    tmdbId,
+  });
+
+  assert.equal(result.blocked, true);
+  assert.equal(result.status, 409);
+  assert.equal(result.present, true);
 });
 
 test('checkInteractiveInventoryDuplicate — mediaType animation = kind movie', async () => {
@@ -48,11 +80,12 @@ test('checkInteractiveInventoryDuplicate — mediaType animation = kind movie', 
   await ensureInventorySchema();
 
   const tmdbId = 987654;
+  const pathSuffix = randomUUID();
   await run(
     `INSERT INTO local_media_inventory (
       id, media_kind, title, title_normalized, year, path, tmdb_id, last_seen_at
-    ) VALUES (?, 'movie', 'Bad Guys 2', 'bad guys 2', 2025, '/media/animation/bad-guys-2.mkv', ?, datetime('now'))`,
-    [randomUUID(), tmdbId]
+    ) VALUES (?, 'movie', 'Bad Guys 2', 'bad guys 2', 2025, ?, ?, datetime('now'))`,
+    [randomUUID(), `/media/animation/bad-guys-2-${pathSuffix}.mkv`, tmdbId]
   );
 
   const result = await checkInteractiveInventoryDuplicate({

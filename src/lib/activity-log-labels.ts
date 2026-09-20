@@ -1,13 +1,15 @@
 const EVENT_LABELS: Record<string, string> = {
   'auth.login_success': 'Connexion réussie',
   'auth.login_failed': 'Échec de connexion',
+  'auth.organizr_sso_success': 'Connexion Organizr (SSO)',
+  'auth.organizr_sso_not_provisioned': 'SSO Organizr — compte Search absent',
   'request.movie_created': 'Demande film créée',
   'request.movie_deleted': 'Demande film supprimée',
   'request.tv_season_created': 'Demande saison créée',
   'request.tv_season_deleted': 'Demande saison supprimée',
   'qbit.sent': 'Envoyé à qBittorrent',
   'auto_search.error': 'Erreur recherche auto',
-  'download.blocked_inventory': 'Téléchargement bloqué (médiathèque)',
+  'download.blocked_inventory': 'Téléchargement bloqué (Emby)',
 };
 
 export function getActivityEventLabel(eventType?: string | null): string {

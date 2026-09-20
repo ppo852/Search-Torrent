@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Download, RefreshCw, Film, Tv, MonitorPlay, Clapperboard, Folder, Music, Book, ChevronRight, CalendarDays, HardDrive, Users, Rss, Sparkles } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Download, RefreshCw, Film, Tv, MonitorPlay, Clapperboard, Folder, Music, Book, ChevronRight, ChevronDown, Check, CalendarDays, HardDrive, Users, Rss, Sparkles } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
 import { formatSize, formatDate } from '../../utils/formatters';
@@ -174,9 +174,21 @@ const TitleWithPoster = ({ poster, originalTitle, category }: TitleWithPosterPro
 export function RssFeedList() {
   const { token, user } = useAuthStore((state) => ({ token: state.token, user: state.user }));
   const [selectedFeed, setSelectedFeed] = useState<string>('all');
+  const [isFeedMenuOpen, setIsFeedMenuOpen] = useState(false);
+  const feedMenuRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
 
   const { download, confirmModal } = useInteractiveTorrentDownload();
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (feedMenuRef.current && !feedMenuRef.current.contains(event.target as Node)) {
+        setIsFeedMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const { data: feeds = [], isLoading: isLoadingFeeds, refetch: refetchFeeds } = useQuery({
     queryKey: ['rss-feeds', token],
@@ -306,37 +318,68 @@ export function RssFeedList() {
   const categories = sortCategories(Object.keys(groupedItems));
   const hasItemsToShow = categories.length > 0;
   
-  // Fonction pour obtenir la classe CSS du conteneur principal des catégories
-  const getContainerClassName = (): string => {
-    return "space-y-6 mt-8";
-  };
-  
-  // Fonction pour obtenir la classe CSS des éléments individuels
-  const getItemClassName = (): string => {
-    return "flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 p-4 hover:bg-white/[0.02] transition-all border-b border-white/5 last:border-0 group";
-  };
+  const selectedFeedLabel =
+    selectedFeed === 'all'
+      ? 'Tous les réseaux'
+      : feeds.find((f: RssFeed) => f.id === selectedFeed)?.feed_name || 'Tous les réseaux';
 
   return (
     <div className="space-y-6">
       {confirmModal}
 
       {/* Barre de contrôles */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 glass-card border-white/5 shadow-2xl">
-        <div className="w-full sm:w-auto flex items-center gap-3">
-          <Rss className="text-orange-500 h-5 w-5" />
-          <select
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-2xl bg-transparent">
+        <div className="w-full sm:w-auto flex items-center gap-3 relative" ref={feedMenuRef}>
+          <Rss className="text-orange-500 h-5 w-5 shrink-0" />
+          <button
+            type="button"
             id="feed-select"
-            value={selectedFeed}
-            onChange={(e) => setSelectedFeed(e.target.value)}
-            className="w-full sm:w-auto bg-black/40 text-white px-4 py-2.5 rounded-xl border border-white/10 focus:outline-none focus:border-blue-500/50 text-xs font-black uppercase tracking-widest appearance-none cursor-pointer"
+            onClick={() => setIsFeedMenuOpen((open) => !open)}
+            className="w-full sm:w-auto min-w-[180px] flex items-center justify-between gap-3 bg-transparent text-white px-4 py-2.5 rounded-xl border border-blue-500/20 hover:border-blue-500/40 focus:outline-none focus:border-blue-500/40 text-xs font-black uppercase tracking-widest transition-colors"
           >
-            <option value="all">Tous les réseaux</option>
-            {feeds.map((feed: RssFeed) => (
-              <option key={feed.id} value={feed.id}>
-                {feed.feed_name}
-              </option>
-            ))}
-          </select>
+            <span className="truncate">{selectedFeedLabel}</span>
+            <ChevronDown size={14} className={`shrink-0 text-blue-400/70 transition-transform ${isFeedMenuOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {isFeedMenuOpen && (
+            <div className="absolute top-full left-0 right-0 sm:left-8 sm:right-auto sm:min-w-[220px] mt-2 soft-menu z-50">
+              <div className="space-y-1 max-h-64 overflow-y-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedFeed('all');
+                    setIsFeedMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all ${
+                    selectedFeed === 'all'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-blue-100/70 hover:bg-blue-600/15 hover:text-white'
+                  }`}
+                >
+                  <span>Tous les réseaux</span>
+                  {selectedFeed === 'all' && <Check size={14} />}
+                </button>
+                {feeds.map((feed: RssFeed) => (
+                  <button
+                    key={feed.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedFeed(feed.id);
+                      setIsFeedMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all ${
+                      selectedFeed === feed.id
+                        ? 'bg-blue-600 text-white'
+                        : 'text-blue-100/70 hover:bg-blue-600/15 hover:text-white'
+                    }`}
+                  >
+                    <span className="truncate">{feed.feed_name}</span>
+                    {selectedFeed === feed.id && <Check size={14} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <button
@@ -344,7 +387,7 @@ export function RssFeedList() {
           disabled={isLoading}
           className={`w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg ${
             isLoading
-              ? 'bg-white/5 text-gray-500 border border-white/5 cursor-not-allowed'
+              ? 'bg-blue-600/5 text-blue-400/40 border border-blue-500/10 cursor-not-allowed'
               : 'bg-blue-600/10 text-blue-400 border border-blue-500/20 hover:bg-blue-600/20 hover:scale-[1.02] shadow-blue-500/10'
           }`}
           title="Rafraîchir les flux"
@@ -356,26 +399,26 @@ export function RssFeedList() {
 
       {/* Affichage des catégories */}
       {!isLoading && !hasItemsToShow && (
-           <div className="glass-card py-20 text-center border-white/5">
-               <p className="text-gray-500 font-black uppercase text-xs tracking-widest opacity-50">Aucun signal détecté sur ces fréquences</p>
+           <div className="rounded-2xl bg-transparent py-20 text-center">
+               <p className="text-blue-400/50 font-black uppercase text-xs tracking-widest">Aucun signal détecté sur ces fréquences</p>
            </div>
       )}
 
       {hasItemsToShow && (
-        <div className={getContainerClassName()}>
+        <div className="space-y-6 mt-8">
           {categories.map((category) => (
             groupedItems[category].length > 0 && (
-              <details key={category} className="glass-card overflow-hidden group/accordion border-white/5 [&_summary::-webkit-details-marker]:hidden">
-                <summary className="px-6 py-5 font-black text-sm uppercase tracking-widest text-white cursor-pointer hover:bg-white/5 transition-all flex justify-between items-center list-none border-b border-transparent group-open/accordion:border-white/5 group-open/accordion:bg-white/[0.02]">
+              <details key={category} className="soft-card overflow-hidden group/accordion [&_summary::-webkit-details-marker]:hidden">
+                <summary className="px-6 py-5 font-black text-sm uppercase tracking-widest text-white cursor-pointer hover:bg-blue-600/10 transition-all flex justify-between items-center list-none group-open/accordion:border-b group-open/accordion:border-blue-500/15 group-open/accordion:bg-blue-950/20">
                   <div className="flex items-center gap-4">
                     <span className="bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">{category}</span>
                     <span className="bg-blue-500/20 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-md text-[10px]">{groupedItems[category].length}</span>
                   </div>
-                  <ChevronRight size={18} className="text-gray-500 group-open/accordion:rotate-90 transform transition-transform duration-300" />
+                  <ChevronRight size={18} className="text-blue-400/50 group-open/accordion:rotate-90 transform transition-transform duration-300" />
                 </summary>
-                <div className="flex flex-col bg-black/20">
+                <div className="flex flex-col gap-3 bg-transparent p-3 sm:p-4">
                   {groupedItems[category].map((item, index) => (
-                    <div key={`${item.link}-${index}`} className={getItemClassName()}>
+                    <div key={`${item.link}-${index}`} className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 p-4 soft-card-interactive group">
                       <div className="flex-1 min-w-0 flex flex-col justify-center">
                         <TitleWithPoster
                           poster={item.tmdbPoster ?? null}

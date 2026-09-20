@@ -4,7 +4,6 @@ import { authenticateToken } from '../../middleware/auth.js';
 import {
   getTorrentsHandler,
   deleteTorrentHandler,
-  getTorrentDetailsHandler,
   getMainDataHandler,
   getCategoriesHandler,
   addTorrentHandler,
@@ -34,13 +33,6 @@ router.get('/torrents', getTorrentsHandler);
  * @access Private
  */
 router.delete('/delete', deleteTorrentHandler);
-
-/**
- * @route GET /api/qbittorrent/torrent/:hash
- * @desc Récupère les détails d'un torrent
- * @access Private
- */
-router.get('/torrent/:hash', getTorrentDetailsHandler);
 
 /**
  * @route GET /api/qbittorrent/sync/maindata

@@ -6,7 +6,7 @@ import fetch from 'node-fetch';
 import prowlarrSearchService, {
   splitQueryTitleAndYear,
 } from '../../services/prowlarr/search.js';
-import { getSetting } from '../../services/settings/index.js';
+import { getSetting, resolveMinSeeds } from '../../services/settings/index.js';
 import { getResultCompatibility } from '../../services/utils/validation.js';
 import { loadAssignedQualityProfile } from '../../services/utils/helpers.js';
 
@@ -74,21 +74,21 @@ async function withInteractiveProfileCompatibility(results, mediaType) {
  */
 export async function searchMovieHandler(req, res) {
   try {
-    const { title, year, tmdbId, mediaType } = req.body;
+    const { title, year, tmdbId, mediaType, expandTextSearch } = req.body;
 
     if (!title) {
       return res.status(400).json({ error: 'Titre requis' });
     }
 
-    const minSeedsSetting = await getSetting('min_seeds');
-    const minSeeds = typeof minSeedsSetting === 'number' ? minSeedsSetting : 3;
+    const minSeeds = await resolveMinSeeds();
 
     const results = await prowlarrSearchService.searchMovie({
       title,
       year: year || '',
       tmdbId: tmdbId || null,
+      mediaType: mediaType === 'animation' ? 'animation' : 'movie',
       minSeeds,
-      filterByRelevance: true
+      expandTextSearch: expandTextSearch === true,
     });
 
     const profileType = mediaType === 'animation' ? 'animation' : 'movie';
@@ -104,17 +104,17 @@ export async function searchMovieHandler(req, res) {
  */
 export async function searchTvSeriesHandler(req, res) {
   try {
-    const { title, mediaType, tmdbId, year } = req.body;
+    const { title, mediaType, tmdbId, year, expandTextSearch } = req.body;
 
-    const minSeedsSetting = await getSetting('min_seeds');
-    const minSeeds = typeof minSeedsSetting === 'number' ? minSeedsSetting : 3;
+    const minSeeds = await resolveMinSeeds();
 
     const results = await prowlarrSearchService.searchTvSeries({
       title,
       year: year || '',
       tmdbId: tmdbId || null,
       mediaType: mediaType || 'tv',
-      minSeeds
+      minSeeds,
+      expandTextSearch: expandTextSearch === true,
     });
 
     res.json({ results: await withInteractiveProfileCompatibility(results, mediaType || 'tv') });
@@ -135,8 +135,7 @@ export async function searchGeneralHandler(req, res) {
       return res.status(400).json({ error: 'Query requis' });
     }
 
-    const minSeedsSetting = await getSetting('min_seeds');
-    const minSeeds = typeof minSeedsSetting === 'number' ? minSeedsSetting : 3;
+    const minSeeds = await resolveMinSeeds();
 
     // For movies / animation films, use the movie search with relevance filtering
     if (category === 'movies' || category === 'animation') {
@@ -146,8 +145,8 @@ export async function searchGeneralHandler(req, res) {
         title,
         year,
         tmdbId: null,
+        mediaType: category === 'animation' ? 'animation' : 'movie',
         minSeeds,
-        filterByRelevance: true
       });
 
       return res.json({

@@ -6,5 +6,7 @@
 export { EmptyState } from './EmptyState';
 export { SearchBar } from './SearchBar';
 export { SortControls } from './SortControls';
+export { FilterSelect } from './FilterSelect';
+export type { FilterSelectOption } from './FilterSelect';
 export { MediaGrid } from './MediaGrid';
 export { ResultCard } from './ResultCard';

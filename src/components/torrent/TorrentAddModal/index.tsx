@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, PlusCircle, Tag, Upload, X } from 'lucide-react';
 import { useTorrentUpload } from '../../../hooks/useTorrentUpload';
+import { FilterSelect } from '../../ui/FilterSelect';
 
 interface TorrentAddModalProps {
   isOpen: boolean;
@@ -11,6 +12,24 @@ interface TorrentAddModalProps {
   onCategoryCreated?: (newCategory: string) => void;
 }
 
+const fieldClass =
+  'w-full p-2.5 sm:p-3 bg-transparent border border-blue-500/20 rounded-xl text-white text-xs sm:text-sm placeholder-white/40 focus:outline-none focus:border-blue-500/40 transition-colors';
+
+const DEFAULT_CATEGORIES = [
+  'Films',
+  'Séries',
+  'Anime',
+  'Animation',
+  'Musique',
+  'Logiciels',
+  'Jeux',
+  'Livres',
+  'Autres',
+  'Sport',
+  'Documentaires',
+];
+
+
 export const TorrentAddModal: React.FC<TorrentAddModalProps> = ({
   isOpen,
   onClose,
@@ -19,19 +38,16 @@ export const TorrentAddModal: React.FC<TorrentAddModalProps> = ({
   initialFiles,
   onCategoryCreated
 }) => {
-  // Fermer le modal puis déclencher le callback de succès éventuel
   const handleSuccess = () => {
     onClose();
     onSuccess?.();
   };
 
-  // Gestion du drag & drop
   const dropRef = React.useRef<HTMLDivElement>(null);
 
   const {
     magnetLink,
     onMagnetChange,
-    handleFileChange,
     handleFiles,
     selectedCategory,
     onCategoryChange,
@@ -44,7 +60,6 @@ export const TorrentAddModal: React.FC<TorrentAddModalProps> = ({
     torrentFiles
   } = useTorrentUpload(handleSuccess);
 
-  // Charger les fichiers passés par drag & drop à l'ouverture
   React.useEffect(() => {
     if (isOpen && initialFiles && initialFiles.length > 0) {
       handleFiles(initialFiles);
@@ -54,27 +69,24 @@ export const TorrentAddModal: React.FC<TorrentAddModalProps> = ({
 
   const [canSubmit, setCanSubmit] = React.useState(false);
   React.useEffect(() => {
-    // Vérifier que nous avons un torrent ET une catégorie sélectionnée
     const hasTorrent = !!magnetLink || (torrentFiles && torrentFiles.length > 0);
     const hasCategory = !!selectedCategory;
     setCanSubmit(hasTorrent && hasCategory);
   }, [magnetLink, torrentFiles, selectedCategory]);
 
-  // Handler pour le drop de fichiers
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-  e.preventDefault();
-  e.stopPropagation();
-  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-    const files = Array.from(e.dataTransfer.files).filter(file =>
-      file.name.toLowerCase().endsWith('.torrent')
-    );
-    if (files.length > 0) {
-      handleFiles(files);
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const files = Array.from(e.dataTransfer.files).filter(file =>
+        file.name.toLowerCase().endsWith('.torrent')
+      );
+      if (files.length > 0) {
+        handleFiles(files);
+      }
     }
-  }
-};
+  };
 
-  // Empêcher le comportement par défaut sur dragover
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
@@ -89,7 +101,6 @@ export const TorrentAddModal: React.FC<TorrentAddModalProps> = ({
     if (newCategory.trim()) {
       const createdCategory = await createCategory(newCategory.trim());
       if (createdCategory && onCategoryCreated) {
-        // Informer le composant parent qu'une nouvelle catégorie a été créée
         onCategoryCreated(createdCategory);
       }
       setNewCategory('');
@@ -97,19 +108,30 @@ export const TorrentAddModal: React.FC<TorrentAddModalProps> = ({
     }
   };
 
+  const categoryOptions = [
+    { value: '', label: 'Sélectionner une catégorie' },
+    ...DEFAULT_CATEGORIES.map((category) => ({ value: category, label: category })),
+    ...categories
+      .filter((category) => !DEFAULT_CATEGORIES.includes(category))
+      .map((category) => ({ value: category, label: category })),
+  ];
+
+  const categoryMissing =
+    !selectedCategory && (!!magnetLink || (torrentFiles && torrentFiles.length > 0));
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
       <div
-        className="bg-gray-800 rounded-lg w-full max-w-lg p-4 sm:p-6 shadow-xl my-auto"
+        className="bg-gray-950 rounded-3xl w-full max-w-lg p-5 sm:p-6 shadow-[0_20px_50px_rgba(0,0,0,0.5)] border border-blue-500/20 my-auto"
         ref={dropRef}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
       >
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg sm:text-xl font-semibold">Ajouter un torrent</h2>
+        <div className="flex justify-between items-center mb-5">
+          <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">Ajouter un torrent</h2>
           <button
             onClick={onClose}
-            className="p-2 rounded-full hover:bg-gray-700"
+            className="p-2 rounded-xl text-white/60 hover:text-white hover:bg-blue-600/15 transition-colors"
             aria-label="Fermer"
           >
             <X className="h-5 w-5" />
@@ -117,10 +139,9 @@ export const TorrentAddModal: React.FC<TorrentAddModalProps> = ({
         </div>
 
         <div className="space-y-4">
-          {/* Lien magnet */}
           <div>
-            <label className="block text-xs sm:text-sm font-medium mb-1 sm:mb-2 flex items-center gap-2">
-              <Link className="h-3 w-3 sm:h-4 sm:w-4" />
+            <label className="block text-xs sm:text-sm font-medium mb-1.5 sm:mb-2 flex items-center gap-2 text-white">
+              <Link className="h-3 w-3 sm:h-4 sm:w-4 text-blue-400/70" />
               Lien magnet
             </label>
             <input
@@ -128,21 +149,19 @@ export const TorrentAddModal: React.FC<TorrentAddModalProps> = ({
               value={magnetLink}
               onChange={onMagnetChange}
               placeholder="magnet:?xt=urn:btih:..."
-              className="w-full p-2 sm:p-3 bg-gray-700 border border-gray-600 rounded-lg text-xs sm:text-sm focus:ring-blue-500 focus:border-blue-500"
+              className={fieldClass}
             />
           </div>
 
-          {/* Séparateur */}
           <div className="flex items-center my-2">
-            <div className="flex-1 h-px bg-gray-700"></div>
-            <span className="px-3 text-xs sm:text-sm text-gray-400">OU</span>
-            <div className="flex-1 h-px bg-gray-700"></div>
+            <div className="flex-1 h-px bg-blue-500/20"></div>
+            <span className="px-3 text-xs sm:text-sm text-blue-400/60 font-medium">OU</span>
+            <div className="flex-1 h-px bg-blue-500/20"></div>
           </div>
 
-          {/* Upload de fichier */}
           <div>
-            <label className="block text-xs sm:text-sm font-medium mb-1 sm:mb-2 flex items-center gap-2">
-              <Upload className="h-3 w-3 sm:h-4 sm:w-4" />
+            <label className="block text-xs sm:text-sm font-medium mb-1.5 sm:mb-2 flex items-center gap-2 text-white">
+              <Upload className="h-3 w-3 sm:h-4 sm:w-4 text-blue-400/70" />
               Fichier torrent
             </label>
             <input
@@ -155,35 +174,33 @@ export const TorrentAddModal: React.FC<TorrentAddModalProps> = ({
             />
             <label
               htmlFor="torrent-upload-input"
-              className="px-4 py-2 bg-blue-500 text-white rounded-md cursor-pointer hover:bg-blue-600"
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600/10 text-blue-300 border border-blue-500/20 rounded-xl cursor-pointer hover:bg-blue-600/20 hover:border-blue-500/40 transition-all text-xs sm:text-sm font-medium"
             >
-              <Upload className="w-4 h-4 inline-block" />
+              <Upload className="w-4 h-4" />
               Fichier
             </label>
-            {/* Afficher la liste des fichiers sélectionnés */}
             {torrentFiles && torrentFiles.length > 0 && (
-              <div className="mt-2 text-xs text-gray-300">
+              <div className="mt-2 space-y-1 text-xs text-blue-400/70">
                 {torrentFiles.map((file, idx) => (
-                  <div key={idx}>{file.name}</div>
+                  <div key={idx} className="truncate">{file.name}</div>
                 ))}
               </div>
             )}
           </div>
 
-          {/* Catégorie avec option de création */}
           <div>
-            <div className="flex justify-between items-center mb-1 sm:mb-2">
-              <label className="block text-xs sm:text-sm font-medium">Catégorie</label>
-              <button 
-                type="button" 
+            <div className="flex justify-between items-center mb-1.5 sm:mb-2">
+              <label className="block text-xs sm:text-sm font-medium text-white">Catégorie</label>
+              <button
+                type="button"
                 onClick={() => setShowCategoryInput(!showCategoryInput)}
-                className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors"
               >
                 <PlusCircle className="h-3 w-3 sm:h-4 sm:w-4" />
                 {showCategoryInput ? 'Annuler' : 'Nouvelle catégorie'}
               </button>
             </div>
-            
+
             {showCategoryInput ? (
               <div className="flex gap-2 mb-2">
                 <input
@@ -191,55 +208,34 @@ export const TorrentAddModal: React.FC<TorrentAddModalProps> = ({
                   value={newCategory}
                   onChange={(e) => setNewCategory(e.target.value)}
                   placeholder="Nom de la catégorie"
-                  className="flex-1 p-2 bg-gray-700 border border-gray-600 rounded-lg text-xs sm:text-sm focus:ring-blue-500 focus:border-blue-500"
+                  className={`flex-1 ${fieldClass}`}
                 />
                 <button
                   onClick={handleCreateCategory}
                   disabled={!newCategory.trim()}
-                  className={`px-2 py-1 rounded-lg text-xs sm:text-sm ${!newCategory.trim() ? 'bg-gray-600 text-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 text-white'}`}
+                  className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all ${
+                    !newCategory.trim()
+                      ? 'bg-blue-600/5 text-blue-400/40 border border-blue-500/10 cursor-not-allowed'
+                      : 'bg-blue-600/10 text-blue-300 border border-blue-500/20 hover:bg-blue-600/20'
+                  }`}
                 >
                   Créer
                 </button>
               </div>
             ) : (
-              <select
-                value={selectedCategory}
-                onChange={(e) => onCategoryChange(e.target.value)}
-                className={`w-full p-2 sm:p-3 bg-gray-700 border ${!selectedCategory && (magnetLink || torrentFiles.length > 0) ? 'border-red-500' : 'border-gray-600'} rounded-lg text-xs sm:text-sm focus:ring-blue-500 focus:border-blue-500`}
-                required
-              >
-                <option value="">Sélectionner une catégorie</option>
-                <option value="Films">Films</option>
-                <option value="Séries">Séries</option>
-                <option value="Anime">Anime</option>
-                <option value="Animation">Animation</option>
-                <option value="Musique">Musique</option>
-                <option value="Logiciels">Logiciels</option>
-                <option value="Jeux">Jeux</option>
-                <option value="Livres">Livres</option>
-                <option value="Autres">Autres</option>
-                <option value="Sport">Sport</option>
-                <option value="Documentaires">Documentaires</option>
-                {/* Filtrer les catégories dynamiques pour éviter les doublons */}
-                {categories
-                  .filter((category: string) => 
-                    !["Films", "Séries", "Anime", "Animation", "Musique", "Logiciels", "Jeux", "Livres", "Autres", "Sport", "Documentaires"]
-                    .includes(category)
-                  )
-                  .map((category: string) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
-                  ))
-                }
-              </select>
+              <div className={categoryMissing ? '[&_button]:border-red-500/50' : ''}>
+                <FilterSelect
+                  value={selectedCategory}
+                  onChange={onCategoryChange}
+                  options={categoryOptions}
+                />
+              </div>
             )}
           </div>
-          
-          {/* Tags */}
+
           <div>
-            <label className="block text-xs sm:text-sm font-medium mb-1 sm:mb-2 flex items-center gap-2">
-              <Tag className="h-3 w-3 sm:h-4 sm:w-4" />
+            <label className="block text-xs sm:text-sm font-medium mb-1.5 sm:mb-2 flex items-center gap-2 text-white">
+              <Tag className="h-3 w-3 sm:h-4 sm:w-4 text-blue-400/70" />
               Tags (séparés par des virgules)
             </label>
             <input
@@ -247,32 +243,30 @@ export const TorrentAddModal: React.FC<TorrentAddModalProps> = ({
               value={tags}
               onChange={(e) => onTagsChange(e.target.value)}
               placeholder="tag1, tag2, tag3"
-              className="w-full p-2 sm:p-3 bg-gray-700 border border-gray-600 rounded-lg text-xs sm:text-sm focus:ring-blue-500 focus:border-blue-500"
+              className={fieldClass}
             />
           </div>
 
-          {/* Message d'erreur */}
           {uploadError && (
-            <div className="p-2 sm:p-3 bg-red-900/50 border border-red-800 rounded-lg text-red-300 text-xs sm:text-sm">
+            <div className="p-2.5 sm:p-3 bg-red-500/10 border border-red-500/25 rounded-xl text-red-300 text-xs sm:text-sm">
               {uploadError}
             </div>
           )}
 
-          {/* Boutons d'action */}
           <div className="flex justify-end gap-2 sm:gap-3 mt-4 sm:mt-6">
             <button
               onClick={onClose}
-              className="px-3 sm:px-4 py-1.5 sm:py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors text-xs sm:text-sm"
+              className="px-4 py-2 rounded-xl bg-transparent border border-blue-500/20 text-white/80 hover:bg-blue-600/10 hover:border-blue-500/40 transition-all text-xs sm:text-sm font-medium"
             >
               Annuler
             </button>
             <button
               onClick={addTorrent}
               disabled={isUploading || !canSubmit}
-              className={`px-3 sm:px-4 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors flex items-center gap-1 sm:gap-2 text-xs sm:text-sm ${
+              className={`px-4 py-2 premium-gradient text-white rounded-xl transition-all flex items-center gap-2 text-xs sm:text-sm font-bold shadow-lg shadow-blue-600/20 ${
                 isUploading || !canSubmit
                   ? 'opacity-50 cursor-not-allowed'
-                  : ''
+                  : 'hover:scale-[1.02] active:scale-[0.98]'
               }`}
             >
               {isUploading ? (

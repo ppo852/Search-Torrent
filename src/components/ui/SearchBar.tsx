@@ -100,7 +100,7 @@ export function SearchBar({ onSearch }: SearchBarProps) {
   return (
     <div className="w-full max-w-4xl mx-auto relative group">
       <form onSubmit={handleSubmit} className="relative z-50">
-        <div className="glass-card p-1.5 flex flex-col md:flex-row gap-2 shadow-2xl transition-all duration-500 focus-within:shadow-blue-500/10 focus-within:scale-[1.01] border-white/5 focus-within:border-white/10">
+        <div className="rounded-2xl bg-white/[0.03] p-1.5 flex flex-col md:flex-row gap-2 shadow-2xl shadow-blue-600/5 transition-all duration-500 border border-transparent focus-within:border-blue-500/25 focus-within:shadow-blue-500/10 focus-within:scale-[1.01]">
           <div className="relative flex-1">
             <input
               type="text"
@@ -120,14 +120,14 @@ export function SearchBar({ onSearch }: SearchBarProps) {
             <button
               type="button"
               onClick={() => setIsOpen(!isOpen)}
-              className="h-12 flex-1 md:flex-none px-5 md:min-w-[140px] flex items-center justify-between gap-3 rounded-xl bg-white/5 border border-white/5 text-gray-300 font-black text-xs uppercase tracking-widest hover:bg-white/10 hover:text-white transition-all outline-none"
+              className="h-12 flex-1 md:flex-none px-5 md:min-w-[140px] flex items-center justify-between gap-3 rounded-xl bg-blue-600/10 border border-blue-500/15 text-white font-black text-xs uppercase tracking-widest hover:bg-blue-600/15 hover:text-white transition-all outline-none"
             >
-              <span className={`truncate ${category === null ? 'text-gray-500' : ''}`}>{selectedLabel}</span>
+              <span className={`truncate ${category === null ? 'text-white/50' : 'text-white'}`}>{selectedLabel}</span>
               <ChevronDown size={16} className={`shrink-0 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
             </button>
 
             {isOpen && (
-              <div className="absolute top-full left-0 right-0 md:w-64 mt-2 p-2 bg-gray-950 border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-50 animate-premium-fade">
+              <div className="absolute top-full left-0 right-0 md:w-64 mt-2 soft-menu z-50">
                 <div className="space-y-1">
                   <button
                     type="button"

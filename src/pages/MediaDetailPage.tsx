@@ -1,9 +1,10 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { api } from '../services/api';
-import { useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { showToast, showApiErrorToast } from '../stores/toastStore';
 import { hasTmdbAnimationGenre, TMDB_ANIMATION_GENRE_ID } from '../lib/tmdb-category-filter';
-import { Calendar, Star, Tv, Film, BookmarkPlus, X, Play } from 'lucide-react';
+import { ArrowLeft, Calendar, Star, Tv, Film, BookmarkPlus, X, Play, Search, ChevronDown, SlidersHorizontal } from 'lucide-react';
+import type { MediaBrowseReturnState } from '../lib/media-browse';
 import { tmdbAPI } from '../services/tmdb/tmdb';
 import { ResultCard } from '../components/ui/ResultCard';
 import { SortControls } from '../components/ui/SortControls';
@@ -27,9 +28,58 @@ import {
   type LanguageFilter,
 } from '../lib/torrent-filters';
 
+async function fetchProwlarrResults(options: {
+  mediaType: 'movie' | 'tv';
+  title: string;
+  year: string;
+  tmdbId: number;
+  isAnime?: boolean;
+  isAnimationMovie?: boolean;
+  expandTextSearch?: boolean;
+}): Promise<SearchResult[]> {
+  const {
+    mediaType,
+    title,
+    year,
+    tmdbId,
+    isAnime = false,
+    isAnimationMovie = false,
+    expandTextSearch = false,
+  } = options;
+  const expandOpts = expandTextSearch ? { expandTextSearch: true as const } : undefined;
+
+  if (mediaType === 'movie') {
+    const response = await api.searchMovie(
+      title,
+      year,
+      tmdbId,
+      isAnimationMovie ? 'animation' : 'movie',
+      expandOpts
+    );
+    return response?.results || [];
+  }
+
+  const response = await api.searchTvSeries(
+    title,
+    isAnime ? 'anime' : 'tv',
+    tmdbId,
+    year,
+    expandOpts
+  );
+  return response?.results || [];
+}
+
+function isMediaBrowseReturnState(value: unknown): value is MediaBrowseReturnState {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.from === 'string' && typeof v.fromLabel === 'string' && v.from.length > 0;
+}
+
 export function MediaDetailPage() {
   const { type, id } = useParams<{ type: string; id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const browseReturn = isMediaBrowseReturnState(location.state) ? location.state : null;
   const [media, setMedia] = useState<(TmdbResult & { backdropPath?: string | null }) | null>(null);
   const [isAnime, setIsAnime] = useState(false);
   const [isAnimationMovie, setIsAnimationMovie] = useState(false);
@@ -46,11 +96,14 @@ export function MediaDetailPage() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [existingSeasonNumbers, setExistingSeasonNumbers] = useState<number[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isExpandingSearch, setIsExpandingSearch] = useState(false);
+  const [searchExpanded, setSearchExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [trailer, setTrailer] = useState<TmdbVideo | null>(null);
   const [trailerModalOpen, setTrailerModalOpen] = useState(false);
   const [seasonStatusRows, setSeasonStatusRows] = useState<TvSeasonStatusRow[]>([]);
-  const { getPosterBadges } = useRequestStatus();
+  const [mobileSourceFiltersOpen, setMobileSourceFiltersOpen] = useState(false);
+  const { getPosterBadgesForMedia } = useRequestStatus();
 
   useEffect(() => {
     const loadMediaDetails = async () => {
@@ -58,6 +111,7 @@ export function MediaDetailPage() {
 
       setTrailer(null);
       setTrailerModalOpen(false);
+      setSearchExpanded(false);
 
       try {
         if (!globalSettings.isTmdbConfigured()) {
@@ -93,9 +147,9 @@ export function MediaDetailPage() {
 
         setMedia({
           id: data.id,
-          title: type === 'movie' ? data.title : data.name,
-          originalTitle: type === 'movie' ? data.original_title : data.original_name,
-          releaseDate: type === 'movie' ? data.release_date : data.first_air_date,
+          title: actualType === 'movie' ? data.title : data.name,
+          originalTitle: actualType === 'movie' ? data.original_title : data.original_name,
+          releaseDate: actualType === 'movie' ? data.release_date : data.first_air_date,
           posterPath: data.poster_path ? `https://image.tmdb.org/t/p/w342${data.poster_path}` : null,
           backdropPath: data.backdrop_path ? `https://image.tmdb.org/t/p/original${data.backdrop_path}` : null,
           type: actualType as 'movie' | 'tv',
@@ -133,18 +187,14 @@ export function MediaDetailPage() {
         const year = (actualType === 'movie' ? data.release_date : data.first_air_date)?.split('-')[0] || '';
         const title = (actualType === 'movie' ? data.title : data.name) || (actualType === 'movie' ? data.original_title : data.original_name) || '';
 
-        if (actualType === 'movie') {
-          const response = await api.searchMovie(
-            title,
-            year,
-            data.id,
-            detectedAnimationMovie ? 'animation' : 'movie'
-          );
-          searchResults = response?.results || [];
-        } else {
-          const response = await api.searchTvSeries(title, detectedAnime ? 'anime' : 'tv', data.id, year);
-          searchResults = response?.results || [];
-        }
+        searchResults = await fetchProwlarrResults({
+          mediaType: actualType as 'movie' | 'tv',
+          title,
+          year,
+          tmdbId: data.id,
+          isAnime: detectedAnime,
+          isAnimationMovie: detectedAnimationMovie,
+        });
 
         setResults(searchResults);
       } catch (err) {
@@ -156,6 +206,41 @@ export function MediaDetailPage() {
 
     loadMediaDetails();
   }, [type, id, setResults, setIsLoading, setError]);
+
+  const handleExpandSearch = useCallback(async () => {
+    if (!media || isExpandingSearch || searchExpanded) return;
+
+    setIsExpandingSearch(true);
+    try {
+      const year = media.releaseDate?.split('-')[0] || '';
+      const title = media.title || media.originalTitle || '';
+      const previousCount = results.length;
+      const searchResults = await fetchProwlarrResults({
+        mediaType: media.type,
+        title,
+        year,
+        tmdbId: media.id,
+        isAnime,
+        isAnimationMovie,
+        expandTextSearch: true,
+      });
+
+      const nextCount = searchResults.length;
+      setResults(searchResults);
+      setSearchExpanded(true);
+      setCurrentPage(1);
+
+      if (nextCount > previousCount) {
+        showToast(`Plus de sources trouvées (${previousCount} → ${nextCount})`);
+      } else {
+        showToast('Aucune source supplémentaire');
+      }
+    } catch (err) {
+      showApiErrorToast(err, 'Échec de la recherche élargie');
+    } finally {
+      setIsExpandingSearch(false);
+    }
+  }, [media, isExpandingSearch, searchExpanded, isAnimationMovie, isAnime, results.length]);
 
   useEffect(() => {
     const loadSeasonStatus = async () => {
@@ -190,19 +275,31 @@ export function MediaDetailPage() {
 
   const closeSeasonModal = () => setSeasonModalOpen(false);
 
+  const completeSeasonNumbers = useMemo(
+    () => new Set(seasonStatusRows.filter((r) => r.complete).map((r) => r.season_number)),
+    [seasonStatusRows]
+  );
+
   const toggleSeasonNumber = (num: number) => {
-    setSelectedSeasonNumbers(prev => prev.includes(num) ? prev.filter(n => n !== num) : [...prev, num].sort((a, b) => a - b));
+    if (existingSeasonNumbers.includes(num) || completeSeasonNumbers.has(num)) return;
+    setSelectedSeasonNumbers((prev) =>
+      prev.includes(num) ? prev.filter((n) => n !== num) : [...prev, num].sort((a, b) => a - b)
+    );
   };
 
   const confirmSeasonRequests = async () => {
     if (!media) return;
+    const toRequest = selectedSeasonNumbers.filter(
+      (n) => !existingSeasonNumbers.includes(n) && !completeSeasonNumbers.has(n)
+    );
+    if (toRequest.length === 0) return;
     try {
       await api.createTvSeasonRequests({
         tmdb_id: media.id,
         media_type: isAnime ? 'anime' : 'tv',
         title: media.title,
         poster_url: media.posterPath || null,
-        season_numbers: selectedSeasonNumbers
+        season_numbers: toRequest
       });
       showToast('Ajouté au suivi');
       closeSeasonModal();
@@ -270,10 +367,19 @@ export function MediaDetailPage() {
       try {
         const existing = await api.getExistingSeasons(media.id, isAnime ? 'anime' : 'tv');
         setExistingSeasonNumbers(existing || []);
-        // Pre-select existing ones + reset newly selected
         setSelectedSeasonNumbers([]);
       } catch (err) {
         setExistingSeasonNumbers([]);
+      }
+      try {
+        const { seasons } = await api.getTvShowSeasonStatus(media.id, {
+          mediaType: isAnime ? 'anime' : 'tv',
+          title: media.title,
+          seasons: tvSeasons.map((s) => s.season_number),
+        });
+        setSeasonStatusRows(seasons || []);
+      } catch {
+        /* keep previous rows */
       }
       setSeasonModalOpen(true);
       return;
@@ -373,7 +479,6 @@ export function MediaDetailPage() {
       if (sortOption === 'name') comp = a.name.localeCompare(b.name);
       else if (sortOption === 'size') comp = a.size - b.size;
       else if (sortOption === 'seeds') comp = a.seeds - b.seeds;
-      else if (sortOption === 'leech') comp = a.leech - b.leech;
       else if (sortOption === 'date') comp = (a.publishDate ? new Date(a.publishDate).getTime() : 0) - (b.publishDate ? new Date(b.publishDate).getTime() : 0);
       return sortDirection === 'asc' ? comp : -comp;
     });
@@ -383,27 +488,45 @@ export function MediaDetailPage() {
   if (!media) return null;
 
   const displayGenres = media.genres?.filter((g) => !((isAnime || isAnimationMovie) && g.id === TMDB_ANIMATION_GENRE_ID)) ?? [];
-  const posterBadges = getPosterBadges(media.id, media.type, isAnime, media.title);
+  const posterBadges = getPosterBadgesForMedia(media);
 
   return (
     <div className="animate-premium-fade relative min-h-screen">
       {/* Background Cinématique */}
       {media.backdropPath && (
-        <div className="fixed inset-0 z-0">
-          <div className="absolute inset-0 bg-gray-950/80 backdrop-blur-3xl" />
+        <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
           <img
             src={media.backdropPath}
-            alt="Backdrop"
-            className="w-full h-full object-cover opacity-20"
+            alt=""
+            className="absolute inset-0 w-full h-full object-cover opacity-[0.28] scale-[1.02]"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/60 to-transparent" />
+          <div className="absolute inset-0 bg-gray-950/50 backdrop-blur-[1px]" />
+          <div className="absolute inset-0 bg-gradient-to-b from-gray-950/75 via-transparent to-gray-950" />
+          <div className="absolute inset-0 bg-gradient-to-r from-gray-950/65 via-transparent to-gray-950/65" />
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                'radial-gradient(ellipse 85% 75% at 50% 40%, transparent 45%, rgba(3,7,18,0.3) 100%)',
+            }}
+          />
         </div>
       )}
 
-      <div className="relative z-10 p-6 max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 mb-20">
+      <div className="relative z-10 space-y-8">
+        {browseReturn && (
+          <Link
+            to={browseReturn.from}
+            className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest text-gray-400 hover:text-white transition-colors"
+          >
+            <ArrowLeft size={16} />
+            {browseReturn.fromLabel}
+          </Link>
+        )}
+        <div className="p-6 md:p-8 rounded-[2rem] border border-blue-500/10 bg-white/[0.03] shadow-[0_16px_64px_rgba(37,99,235,0.12)] backdrop-blur-xl">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
           <div className="lg:col-span-3">
-            <div className="glass-card relative overflow-hidden shadow-2xl group border-white/10">
+            <div className="relative overflow-hidden rounded-[1.75rem] shadow-[0_12px_40px_rgba(0,0,0,0.45)] ring-1 ring-blue-500/15 max-w-[220px] sm:max-w-[260px] mx-auto lg:mx-0 lg:max-w-none group">
               <div className="relative">
                 {posterBadges.length > 0 && <PosterBadgeStack badges={posterBadges} />}
               {media.posterPath ? (
@@ -419,7 +542,7 @@ export function MediaDetailPage() {
             </div>
             </div>
 
-          <div className="lg:col-span-9 flex flex-col justify-center">
+          <div className="lg:col-span-9 flex flex-col justify-start lg:pt-2">
             <div className="flex items-center gap-4 mb-4">
               <div className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${media.type === 'movie' ? 'bg-blue-600/20 border-blue-500/50 text-blue-400' : 'bg-purple-600/20 border-purple-500/50 text-purple-400'}`}>
                 {media.type === 'movie'
@@ -477,59 +600,126 @@ export function MediaDetailPage() {
               <ExpandableText text={media.overview || "Aucun résumé disponible pour ce média."} maxLines={3} className="max-w-4xl" />
             </div>
 
-            <div className="flex flex-wrap gap-4">
+            <div className="flex flex-row items-center gap-2 sm:gap-4">
               {trailer && (
                 <button
                   type="button"
                   onClick={() => setTrailerModalOpen(true)}
-                  className="px-6 py-2.5 bg-white/5 hover:bg-white/10 text-white font-black text-sm flex items-center gap-2 rounded-xl border border-white/10 transition-all tracking-widest hover:scale-[1.02] active:scale-[0.98]"
+                  className="flex-1 sm:flex-none px-3 sm:px-6 py-2 sm:py-2.5 bg-white/5 hover:bg-white/10 text-white font-black text-[10px] sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl border border-white/10 transition-all tracking-widest hover:scale-[1.02] active:scale-[0.98]"
                 >
-                  <Play size={18} className="text-red-400 fill-red-400" />
+                  <Play size={16} className="text-red-400 fill-red-400 shrink-0 sm:w-[18px] sm:h-[18px]" />
                   BANDE-ANNONCE
                 </button>
               )}
               <button
                 onClick={handleTrack}
-                className="px-6 py-2.5 premium-gradient text-white font-black text-sm flex items-center gap-2 rounded-xl shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all tracking-widest"
+                className="flex-1 sm:flex-none px-3 sm:px-6 py-2 sm:py-2.5 premium-gradient text-white font-black text-[10px] sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all tracking-widest"
               >
-                <BookmarkPlus size={18} />
+                <BookmarkPlus size={16} className="shrink-0 sm:w-[18px] sm:h-[18px]" />
                 AUTOMATISER
               </button>
             </div>
 
             {media.type === 'tv' && (
-              <TvShowSeasonStatusPanel rows={seasonStatusRows} />
+              <TvShowSeasonStatusPanel rows={seasonStatusRows} mediaType={isAnime ? 'anime' : 'tv'} />
             )}
           </div>
         </div>
+        </div>
 
-        <div className="space-y-10 border-t border-white/5 pt-16">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-            <div>
+        <div className="space-y-10 border-t border-white/5 pt-8">
+          <div className="space-y-5">
+            <div className="text-center">
               <h2 className="text-xl font-black text-white tracking-tight uppercase mb-1">Sources Disponibles</h2>
-              <p className="text-gray-500 font-medium italic text-sm">Les meilleures versions détectées sur les indexeurs</p>
+              <p className="text-gray-500 font-medium italic text-sm">
+                {searchExpanded
+                  ? 'Recherche élargie — plus de sources'
+                  : 'Les meilleures versions détectées sur les indexeurs'}
+              </p>
             </div>
 
-            <div className="flex flex-col gap-3 glass p-3 rounded-2xl border-white/5 w-full xl:w-auto">
+            <div className="lg:hidden space-y-3 w-full max-w-full">
+              <button
+                type="button"
+                onClick={() => setMobileSourceFiltersOpen((open) => !open)}
+                className="w-full flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-gray-300 hover:text-white hover:bg-white/10 transition-all"
+                aria-expanded={mobileSourceFiltersOpen}
+              >
+                <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest">
+                  <SlidersHorizontal size={14} />
+                  Filtres
+                  {(qualityFilter !== 'all' || languageFilter !== 'admin' || selectedSeason !== 'all') && (
+                    <span className="min-w-[1.25rem] h-5 px-1.5 rounded-full bg-blue-600 text-white text-[10px] font-black flex items-center justify-center">
+                      {(qualityFilter !== 'all' ? 1 : 0) +
+                        (languageFilter !== 'admin' ? 1 : 0) +
+                        (selectedSeason !== 'all' ? 1 : 0)}
+                    </span>
+                  )}
+                </span>
+                <ChevronDown
+                  size={16}
+                  className={`transition-transform duration-300 ${mobileSourceFiltersOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+              {mobileSourceFiltersOpen && (
+                <div className="flex flex-wrap items-end justify-center gap-x-3 gap-y-2 soft-card p-3 w-full">
+                  <SortControls
+                    sortOption={sortOption}
+                    sortDirection={sortDirection}
+                    onSort={(option) => handleSort(option)}
+                    className="mt-0"
+                  />
+                  {sourceFilterConfigs.map((filter) => (
+                    <FilterSelect
+                      key={`mobile-${filter.key}`}
+                      label={filter.label}
+                      value={filter.value}
+                      options={filter.options}
+                      onChange={(value) => handleSourceFilterChange(filter.key, value)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="hidden lg:flex flex-wrap items-end justify-center gap-x-3 gap-y-2 soft-card p-3 w-fit max-w-full mx-auto">
               <SortControls
                 sortOption={sortOption}
                 sortDirection={sortDirection}
                 onSort={(option) => handleSort(option)}
                 className="mt-0"
               />
-
-              <div className="flex flex-wrap items-end gap-3">
-                {sourceFilterConfigs.map((filter) => (
-                  <FilterSelect
-                    key={filter.key}
-                    label={filter.label}
-                    value={filter.value}
-                    options={filter.options}
-                    onChange={(value) => handleSourceFilterChange(filter.key, value)}
-                  />
-                ))}
-              </div>
+              {sourceFilterConfigs.map((filter) => (
+                <FilterSelect
+                  key={`desktop-${filter.key}`}
+                  label={filter.label}
+                  value={filter.value}
+                  options={filter.options}
+                  onChange={(value) => handleSourceFilterChange(filter.key, value)}
+                />
+              ))}
             </div>
+
+            {!isLoading && media && (
+              <button
+                type="button"
+                onClick={handleExpandSearch}
+                disabled={isExpandingSearch || searchExpanded}
+                className="px-5 py-2.5 rounded-xl bg-transparent border border-blue-500/60 text-blue-300 font-black uppercase tracking-widest text-[10px] hover:bg-blue-500/10 hover:border-blue-400 hover:text-blue-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 w-fit"
+                title={
+                  searchExpanded
+                    ? 'Recherche déjà élargie'
+                    : 'Chercher plus de sources'
+                }
+              >
+                <Search size={16} className={isExpandingSearch ? 'animate-pulse' : ''} />
+                {isExpandingSearch
+                  ? 'Recherche...'
+                  : searchExpanded
+                    ? 'Déjà fait'
+                    : 'Plus de résultats'}
+              </button>
+            )}
           </div>
 
           {isLoading ? (
@@ -538,9 +728,9 @@ export function MediaDetailPage() {
               <p className="text-gray-500 font-black uppercase tracking-widest animate-pulse text-xs">Scan en cours...</p>
             </div>
           ) : filteredResults.length === 0 ? (
-            <div className="glass-card py-20 flex flex-col items-center justify-center text-center opacity-50">
-              <Film size={48} className="text-gray-800 mb-4" />
-              <p className="text-gray-500 text-lg font-bold uppercase tracking-tighter">Aucune source trouvée</p>
+            <div className="soft-card py-20 flex flex-col items-center justify-center text-center opacity-50">
+              <Film size={48} className="text-blue-400/30 mb-4" />
+              <p className="text-blue-400/60 text-lg font-bold uppercase tracking-tighter">Aucune source trouvée</p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -625,46 +815,67 @@ export function MediaDetailPage() {
 
             {/* Corps : Défilable uniquement ici */}
             <div className="flex-1 p-8 overflow-y-auto custom-scrollbar space-y-3">
-              {tvSeasons.length > 0 ? tvSeasons.map((season) => (
+              {tvSeasons.length > 0 ? tvSeasons.map((season) => {
+                const alreadyTracked = existingSeasonNumbers.includes(season.season_number);
+                const alreadyOnEmby = completeSeasonNumbers.has(season.season_number);
+                const locked = alreadyTracked || alreadyOnEmby;
+                const selected = selectedSeasonNumbers.includes(season.season_number);
+
+                return (
                 <label
                   key={season.season_number}
-                  className={`group flex items-center justify-between p-5 rounded-2xl cursor-pointer transition-all border ${existingSeasonNumbers.includes(season.season_number)
-                    ? 'bg-green-600/10 border-green-600/30 text-white cursor-default'
-                    : selectedSeasonNumbers.includes(season.season_number)
-                      ? 'bg-blue-600/10 border-blue-600/30 text-white shadow-lg shadow-blue-600/5'
-                      : 'bg-white/5 border-transparent text-gray-400 hover:bg-white/10'
+                  className={`group flex items-center justify-between p-5 rounded-2xl transition-all border ${
+                    alreadyOnEmby
+                      ? 'bg-white/[0.02] border-white/5 text-gray-600 cursor-not-allowed opacity-60'
+                      : alreadyTracked
+                        ? 'bg-green-600/10 border-green-600/30 text-white cursor-default'
+                        : selected
+                          ? 'bg-blue-600/10 border-blue-600/30 text-white shadow-lg shadow-blue-600/5 cursor-pointer'
+                          : 'bg-white/5 border-transparent text-gray-400 hover:bg-white/10 cursor-pointer'
                     }`}
                 >
                   <div className="flex items-center gap-4">
-                    <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${existingSeasonNumbers.includes(season.season_number)
-                      ? 'bg-green-600 border-green-600'
-                      : selectedSeasonNumbers.includes(season.season_number)
-                        ? 'bg-blue-600 border-blue-600'
-                        : 'border-white/20'
+                    <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${
+                      alreadyOnEmby
+                        ? 'bg-gray-700 border-gray-600'
+                        : alreadyTracked
+                          ? 'bg-green-600 border-green-600'
+                          : selected
+                            ? 'bg-blue-600 border-blue-600'
+                            : 'border-white/20'
                       }`}>
-                      {(existingSeasonNumbers.includes(season.season_number) || selectedSeasonNumbers.includes(season.season_number)) && (
+                      {(alreadyTracked || selected) && !alreadyOnEmby && (
                         <div className="w-2.5 h-2.5 bg-white rounded-full shadow-sm" />
+                      )}
+                      {alreadyOnEmby && (
+                        <div className="w-2.5 h-2.5 bg-gray-500 rounded-full" />
                       )}
                     </div>
                     <div className="flex flex-col">
-                      <span className="font-black text-sm uppercase tracking-widest group-hover:text-white transition-colors">
+                      <span className={`font-black text-sm uppercase tracking-widest transition-colors ${locked ? '' : 'group-hover:text-white'}`}>
                         {season.name || `Saison ${season.season_number}`}
                       </span>
-                      {existingSeasonNumbers.includes(season.season_number) && (
+                      {alreadyOnEmby && (
+                        <span className="text-[9px] text-emerald-500/80 font-black uppercase tracking-tighter">
+                          Déjà disponible sur Emby
+                        </span>
+                      )}
+                      {!alreadyOnEmby && alreadyTracked && (
                         <span className="text-[9px] text-green-500 font-black uppercase tracking-tighter">Déjà en suivi</span>
                       )}
                     </div>
                   </div>
-                  {!existingSeasonNumbers.includes(season.season_number) && (
+                  {!locked && (
                     <input
                       type="checkbox"
                       className="hidden"
-                      checked={selectedSeasonNumbers.includes(season.season_number)}
+                      checked={selected}
                       onChange={() => toggleSeasonNumber(season.season_number)}
                     />
                   )}
                 </label>
-              )) : (
+                );
+              }) : (
                 <div className="py-20 text-center opacity-30">
                   <Tv size={48} className="mx-auto mb-4" />
                   <p className="font-black uppercase tracking-widest text-[10px]">Aucune saison détectée</p>

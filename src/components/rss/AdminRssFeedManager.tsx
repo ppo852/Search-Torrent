@@ -4,6 +4,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { showErrorToast, showToast } from '../../stores/toastStore';
 import { api } from '../../services/api';
+import type { SessionUser } from '../../types';
 
 interface CacheInfo {
   lastUpdated: string;
@@ -17,12 +18,6 @@ interface RssFeed {
   feed_url: string;
   created_at: string;
   cache?: CacheInfo | null;
-}
-
-interface User {
-  id: string;
-  username: string;
-  is_admin: boolean;
 }
 
 interface CacheSummarySection {
@@ -44,14 +39,14 @@ interface CacheStatsResponse {
 }
 
 interface AdminRssFeedManagerProps {
-  user?: User | null;
+  user?: SessionUser | null;
 }
 
 const CACHE_SUMMARY_ROWS: Array<{ key: keyof CacheSummary; label: string }> = [
   { key: 'rss', label: 'Flux RSS' },
   { key: 'tmdb', label: 'TMDB titres' },
   { key: 'tmdbTvShow', label: 'TMDB shows' },
-  { key: 'appCache', label: 'Accueil + tendances' },
+  { key: 'appCache', label: 'Découvrir + tendances' },
 ];
 
 function formatCacheSize(bytes: number): string {
@@ -79,7 +74,12 @@ export function AdminRssFeedManager({ user: propUser }: AdminRssFeedManagerProps
       const data: CacheStatsResponse = await api.getRssCacheStats();
       setCacheSummary(data.summary);
       setFeeds(data.feeds);
-    } catch (err) {}
+    } catch (err) {
+      console.warn('[AdminRss] cache status', err);
+      showErrorToast(
+        err instanceof Error ? err.message : 'Impossible de charger le statut du cache RSS'
+      );
+    }
   };
 
   const loadFeeds = async () => {
@@ -103,7 +103,7 @@ export function AdminRssFeedManager({ user: propUser }: AdminRssFeedManagerProps
       showToast('Nouveau flux enregistré');
       loadFeeds();
     } catch (err) {
-      showErrorToast('Erreur lors de l\'enregistrement');
+      showErrorToast(err instanceof Error ? err.message : 'Erreur lors de l\'enregistrement');
     }
   };
 

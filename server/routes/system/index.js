@@ -2,7 +2,7 @@ import express from 'express';
 import fetch from 'node-fetch';
 import { createReadStream, existsSync } from 'fs';
 import { getDiskSpace } from '../../services/core/system.js';
-import qbittorrentService from '../../services/qbittorrent/client.js';
+import qbittorrentService from '../../services/qbittorrent/index.js';
 import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 import { getSetting } from '../../services/settings/index.js';
 import config from '../../services/core/config.js';

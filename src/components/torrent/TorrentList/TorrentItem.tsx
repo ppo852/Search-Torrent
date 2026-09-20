@@ -1,6 +1,6 @@
 import React from 'react';
 import { Torrent } from '../../../types/qbittorrent';
-import { Trash2, ArrowDown, ArrowUp, Pause, Play, Clock, Tag, HardDrive, X, Calendar } from 'lucide-react';
+import { Trash2, ArrowDown, ArrowUp, Pause, Play, Clock, Tag, HardDrive, Calendar } from 'lucide-react';
 import { formatSize, formatSpeed, formatRatioWithColor, formatDate } from '../../../utils/formatters';
 import { getTorrentColor, getTrackerName } from '../../../utils/torrentUtils';
 import { TorrentContextMenu } from '../TorrentContextMenu';
@@ -56,7 +56,7 @@ export const TorrentItem: React.FC<TorrentItemProps> = ({
 
   return (
     <div
-      className={`relative group transition-all duration-300 border-l-4 cursor-pointer ${isSelected ? 'bg-blue-600/5 border-blue-500' : 'bg-transparent border-transparent hover:bg-white/5'
+      className={`relative group transition-all duration-300 cursor-pointer soft-card ${isSelected ? 'bg-blue-600/10 border-blue-500/25' : 'hover:bg-blue-600/10 hover:border-blue-500/25'
         }`}
       onClick={() => onSelect(torrent.hash)}
     >
@@ -75,21 +75,21 @@ export const TorrentItem: React.FC<TorrentItemProps> = ({
                   <h3 className="text-white font-bold text-sm sm:text-base truncate tracking-tight uppercase" title={torrent.name}>{torrent.name}</h3>
                   <div className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border ${torrent.state === 'downloading' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' :
                       torrent.state === 'uploading' ? 'bg-green-500/10 border-green-500/20 text-green-400' :
-                        'bg-white/5 border-white/10 text-gray-500'
+                        'bg-blue-500/5 border-blue-500/15 text-blue-400/60'
                     }`}>{stateLabel}</div>
                 </div>
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
-                  <span className="flex items-center gap-1.5"><HardDrive size={12} className="text-gray-700" />{formatSize(torrent.size)}</span>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] font-bold text-blue-400/55 uppercase tracking-widest">
+                  <span className="flex items-center gap-1.5"><HardDrive size={12} className="text-blue-400/40" />{formatSize(torrent.size)}</span>
                   {torrent.progress < 1 && <span className="flex items-center gap-1.5 text-blue-400/80"><Clock size={12} />{formatEta((torrent as any).eta)}</span>}
-                  {torrent.category && <span className="flex items-center gap-1.5 text-purple-400/80"><Tag size={12} />{torrent.category}</span>}
+                  {torrent.category && <span className="flex items-center gap-1.5 text-violet-400/80"><Tag size={12} />{torrent.category}</span>}
                   {(torrent.added_on && torrent.added_on > 0 && torrent.added_on < 4000000000) ? (
-                    <span className="flex items-center gap-1.5 text-gray-400/80" title="Date d'ajout">
-                      <Calendar size={12} className="text-gray-700" />
+                    <span className="flex items-center gap-1.5 text-blue-400/70" title="Date d'ajout">
+                      <Calendar size={12} className="text-blue-400/40" />
                       {formatDate(torrent.added_on)}
                     </span>
                   ) : (torrent.completion_on && torrent.completion_on > 0 && torrent.completion_on < 4000000000) ? (
-                    <span className="flex items-center gap-1.5 text-gray-400/80" title="Date de fin">
-                      <Calendar size={12} className="text-gray-700" />
+                    <span className="flex items-center gap-1.5 text-blue-400/70" title="Date de fin">
+                      <Calendar size={12} className="text-blue-400/40" />
                       {formatDate(torrent.completion_on)}
                     </span>
                   ) : null}
@@ -118,7 +118,7 @@ export const TorrentItem: React.FC<TorrentItemProps> = ({
               </div>
 
               <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                <button onClick={() => isPaused ? onResume(torrent.hash) : onPause(torrent.hash)} className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all active:scale-95">
+                <button onClick={() => isPaused ? onResume(torrent.hash) : onPause(torrent.hash)} className="p-2.5 rounded-xl bg-transparent border border-blue-500/15 hover:bg-blue-600/15 text-blue-400/70 hover:text-white transition-all active:scale-95">
                   {isPaused ? <Play size={16} fill="currentColor" /> : <Pause size={16} fill="currentColor" />}
                 </button>
                 <button onClick={() => onDelete(torrent.hash)} className="p-2.5 rounded-xl bg-red-600/5 hover:bg-red-600/10 text-red-400/60 hover:text-red-400 transition-all active:scale-95" title="Supprimer">
@@ -134,7 +134,7 @@ export const TorrentItem: React.FC<TorrentItemProps> = ({
                   <div className="flex items-center gap-1.5 text-blue-400"><ArrowDown size={12} strokeWidth={3} /><span>{formatSpeed(torrent.dlspeed || 0)}</span></div>
                   <div className="flex items-center gap-1.5 text-green-400"><ArrowUp size={12} strokeWidth={3} /><span>{formatSpeed(torrent.upspeed || 0)}</span></div>
                 </div>
-                <div className="flex items-center gap-4 text-gray-500">
+                <div className="flex items-center gap-4 text-blue-400/55">
                   <span className={ratioFormat.color}>Ratio: {ratioFormat.text}</span>
                   <span className="text-white">{(torrent.progress * 100).toFixed(1)}%</span>
                 </div>

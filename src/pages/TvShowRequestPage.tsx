@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Clock, Search, Tag, Trash2, X } from 'lucide-react';
 import { api } from '../services/api';
-import { TvSeasonRequest, TvEpisode, TvSeasonPresence } from '../types';
+import { TvSeasonRequest, TvSeasonPresence } from '../types';
 import ManualSearchModal from '../components/ManualSearchModal';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { showErrorToast, showInfoToast, showToast } from '../stores/toastStore';
@@ -11,6 +11,14 @@ import { useAuthStore } from '../stores/authStore';
 import { tmdbAPI } from '../services/tmdb/tmdb';
 import { ExpandableText } from '../components/ui/ExpandableText';
 import { getRequestStatusBadge } from '../lib/request-status-labels';
+import {
+  EPISODE_FAILED_LABEL,
+  EPISODE_RETRY_HINT,
+  SEASON_FAILED_COUNTER_LABEL,
+  formatRequestErrorMessage,
+} from '../lib/request-error-messages';
+import { isAlreadyPresentConflict, resolveForceDownloadPermission } from '../lib/force-download-permission';
+import { notifyTvAutoSearchResult } from '../lib/tv-auto-search-toasts';
 
 
 type TvDetailEpisode = {
@@ -68,15 +76,13 @@ export function TvShowRequestPage() {
 
   const [seasons, setSeasons] = useState<TvSeasonRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [backdropPath, setBackdropPath] = useState<string | null>(null);
   const [overview, setOverview] = useState<string | null>(null);
 
   const [expandedSeasonIds, setExpandedSeasonIds] = useState<Set<string>>(new Set());
   const [episodesBySeasonId, setEpisodesBySeasonId] = useState<Record<string, TvDetailEpisode[]>>({});
   const [episodesLoadingSeasonId, setEpisodesLoadingSeasonId] = useState<string | null>(null);
-  const [presenceBySeasonId, setPresenceBySeasonId] = useState<Record<string, { present_episodes: number[]; downloading_episodes: number[]; missing_episodes: number[] }>>({});
-  const [presenceLoadingSeasonId, setPresenceLoadingSeasonId] = useState<string | null>(null);
+  const [presenceBySeasonId, setPresenceBySeasonId] = useState<Record<string, TvSeasonPresence>>({});
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalLoading, setModalLoading] = useState(false);
@@ -118,10 +124,12 @@ export function TvShowRequestPage() {
           })
         );
       } else {
-        setError('Aucune saison');
+        showErrorToast('Aucune saison');
         setExpandedSeasonIds(new Set());
       }
-    } catch (e) { setError('Erreur'); }
+    } catch {
+      showErrorToast('Erreur lors du chargement des saisons');
+    }
     finally { setIsLoading(false); }
   };
 
@@ -154,24 +162,20 @@ export function TvShowRequestPage() {
 
   const loadSeasonPresence = async (season: TvSeasonRequest, force = false) => {
     if (!force && presenceBySeasonId[season.id]) return;
-    setPresenceLoadingSeasonId(season.id);
     try {
       const data = await api.getTvSeasonPresence(season.id);
       setPresenceBySeasonId(prev => ({ ...prev, [season.id]: data }));
       if (data?.status != null) {
         setSeasons(prev => prev.map(s => {
           if (s.id !== season.id) return s;
-          const clearedError = data.status === 'monitoring' || data.status === 'completed';
           return {
             ...s,
             status: data.status,
             next_episode_number: data.next_episode_number ?? s.next_episode_number,
-            ...(clearedError ? { last_error: null } : {})
           };
         }));
       }
     } catch (e) { }
-    finally { setPresenceLoadingSeasonId(null); }
   };
 
   const toggleSeason = async (season: TvSeasonRequest) => {
@@ -243,22 +247,12 @@ export function TvShowRequestPage() {
       resetModalState();
       showToast(modalEpisodeNumber ? `Épisode E${modalEpisodeNumber} envoyé !` : `Pack Saison ${modalSeason.season_number} envoyé !`);
     } catch (e: any) {
-      if (e?.status === 409) {
-        setModalError('Déjà présent dans la médiathèque');
-        let canForceLive = canForce;
-        if (user?.id) {
-          try {
-            const freshUser = await api.getUser(user.id);
-            canForceLive = !!freshUser?.allow_force_interactive_download;
-            if (canForceLive !== canForce) {
-              useAuthStore.getState().patchUser({
-                allow_force_interactive_download: canForceLive,
-              });
-            }
-          } catch {
-            /* garder la valeur locale */
-          }
-        }
+      if (isAlreadyPresentConflict(e)) {
+        setModalError('Déjà présent dans Emby');
+        const canForceLive = await resolveForceDownloadPermission({
+          userId: user?.id,
+          canForce,
+        });
         setForceAvailable(canForceLive);
       } else {
         setModalError('Erreur envoi');
@@ -296,18 +290,7 @@ export function TvShowRequestPage() {
       const data = await api.autoSearchTvSeasonEpisodeRequest(season.id, { episode_number: episodeNumber });
       if (data?.request) {
         setSeasons(prev => prev.map(s => s.id === data.request.id ? data.request : s));
-        const status = data.result?.status;
-        if (status === 'sent_episode') {
-          showToast(`Torrent trouvé et envoyé pour E${episodeNumber} !`);
-        } else if (status === 'no_results') {
-          showInfoToast(`Aucun résultat conforme pour E${episodeNumber}.`);
-        } else if (status === 'already_present') {
-          showInfoToast(`Épisode ${episodeNumber} déjà présent.`);
-        } else if (status === 'not_aired') {
-          showInfoToast(`Épisode ${episodeNumber} pas encore diffusé.`);
-        } else if (status === 'error') {
-          showErrorToast(`Erreur : ${data.result?.error || 'Échec de la recherche'}`);
-        }
+        notifyTvAutoSearchResult(data.result, { episodeNumber });
       }
     } catch (e: any) {
       showErrorToast(`Erreur lors de la recherche : ${e.message || 'Erreur inconnue'}`);
@@ -320,7 +303,7 @@ export function TvShowRequestPage() {
       const data = await api.autoSearchTvSeasonRequest(season.id);
       if (data?.request) {
         setSeasons(prev => prev.map(s => s.id === data.request.id ? data.request : s));
-        showToast(`Scan de la saison ${season.season_number} terminé.`);
+        notifyTvAutoSearchResult(data.result, { seasonNumber: season.season_number });
       }
     } catch (e: any) {
       showErrorToast(`Erreur lors du scan : ${e.message || 'Erreur inconnue'}`);
@@ -366,26 +349,38 @@ export function TvShowRequestPage() {
   return (
     <div className="animate-premium-fade relative min-h-screen pb-20">
       {backdropPath && (
-        <div className="fixed inset-0 z-0">
-          <div className="absolute inset-0 bg-gray-950/80 backdrop-blur-3xl" />
-          <img src={backdropPath} alt="Backdrop" className="w-full h-full object-cover opacity-20" />
-          <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/60 to-transparent" />
+        <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+          <img
+            src={backdropPath}
+            alt=""
+            className="absolute inset-0 w-full h-full object-cover opacity-[0.28] scale-[1.02]"
+          />
+          <div className="absolute inset-0 bg-gray-950/50 backdrop-blur-[1px]" />
+          <div className="absolute inset-0 bg-gradient-to-b from-gray-950/75 via-transparent to-gray-950" />
+          <div className="absolute inset-0 bg-gradient-to-r from-gray-950/65 via-transparent to-gray-950/65" />
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                'radial-gradient(ellipse 85% 75% at 50% 40%, transparent 45%, rgba(3,7,18,0.3) 100%)',
+            }}
+          />
         </div>
       )}
 
       <div className="relative z-10 space-y-8">
         <div className="flex items-center justify-between">
-          <button onClick={() => navigate('/library')} className="flex items-center gap-2 text-gray-500 hover:text-white group transition-all">
-            <div className="p-2 bg-white/5 rounded-full group-hover:bg-white/10 transition-colors"><ArrowLeft size={18} /></div>
+          <button onClick={() => navigate('/library')} className="flex items-center gap-2 text-blue-400/70 hover:text-blue-200 group transition-all">
+            <div className="p-2 rounded-2xl bg-blue-600/10 border border-blue-500/20 group-hover:bg-blue-600/20 transition-colors"><ArrowLeft size={18} /></div>
             <span className="font-bold tracking-tight">Demandes</span>
           </button>
-          <button onClick={load} className="px-6 py-2 rounded-xl bg-white/5 border border-white/10 text-gray-400 font-bold hover:bg-white/10 transition-all uppercase text-[10px] tracking-widest">Rafraîchir</button>
+          <button onClick={load} className="px-6 py-2 rounded-2xl bg-blue-600/10 border border-blue-500/25 text-blue-300 font-bold hover:bg-blue-600/20 transition-all uppercase text-[10px] tracking-widest">Rafraîchir</button>
         </div>
 
-        <div className="glass-card p-8 border-white/5">
+        <div className="p-8 rounded-[2rem] border border-transparent bg-white/[0.03] shadow-[0_16px_64px_rgba(37,99,235,0.12)] backdrop-blur-xl">
           <div className="flex flex-col md:flex-row gap-10">
             <div className="w-32 md:w-48 lg:w-64 flex-shrink-0 mx-auto md:mx-0">
-              <div className="glass-card overflow-hidden shadow-2xl rotate-1">
+              <div className="overflow-hidden rounded-[1.75rem] shadow-[0_12px_40px_rgba(0,0,0,0.45)] rotate-1 ring-1 ring-blue-500/15">
                 {posterUrl ? <img src={posterUrl} alt={title} className="w-full h-auto object-cover" /> : <div className="aspect-[2/3] flex items-center justify-center bg-gray-900 text-gray-600 font-black uppercase text-xs">No Poster</div>}
               </div>
             </div>
@@ -393,14 +388,14 @@ export function TvShowRequestPage() {
               <div>
                 <h1 className="text-2xl lg:text-3xl font-black text-white tracking-tighter uppercase mb-4">{title}</h1>
                 <div className="flex items-center gap-3">
-                  <div className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${isAnimeShow ? 'bg-pink-500/10 border-pink-500/20 text-pink-400' : 'bg-blue-500/10 border-blue-500/20 text-blue-400'}`}>
+                  <div className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest border ${isAnimeShow ? 'bg-pink-500/10 border-pink-500/20 text-pink-400' : 'bg-blue-500/10 border-blue-500/20 text-blue-400'}`}>
                     {mediaTypeLabel}
                   </div>
-                  <div className="text-gray-500 text-xs font-bold uppercase tracking-widest">{seasons.length} Saison{seasons.length > 1 ? 's' : ''}</div>
+                  <div className="text-blue-400/70 text-xs font-bold uppercase tracking-widest">{seasons.length} Saison{seasons.length > 1 ? 's' : ''}</div>
                 </div>
               </div>
               <div className="space-y-2">
-                <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Synopsis</h3>
+                <h3 className="text-[10px] font-black text-blue-400/70 uppercase tracking-widest">Synopsis</h3>
                 <ExpandableText text={overview || "Aucune description."} maxLines={3} className="max-w-3xl" />
               </div>
               {hasLimitedActions && (
@@ -414,15 +409,22 @@ export function TvShowRequestPage() {
         </div>
 
         <div className="space-y-4">
-          <h2 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em] ml-2">Flux de surveillance</h2>
+          <div className="ml-1">
+            <h2 className="text-lg md:text-xl font-bold text-white">Saisons suivies</h2>
+              <p className="text-xs text-blue-400/70 mt-0.5">
+              {sortedSeasons.length > 1
+                ? `${sortedSeasons.length} saisons demandées — épisodes indexés, en cours et manquants`
+                : 'Épisodes indexés, en cours et manquants'}
+            </p>
+          </div>
           {sortedSeasons.map((s) => (
-            <div key={s.id} className={`glass-card transition-all border-white/5 overflow-hidden ${expandedSeasonIds.has(s.id) ? 'ring-2 ring-blue-500/20' : ''}`}>
+            <div key={s.id} className={`glass-card transition-all rounded-3xl border-blue-500/10 bg-white/[0.02] shadow-[0_12px_48px_rgba(37,99,235,0.08)] overflow-hidden ${expandedSeasonIds.has(s.id) ? 'ring-1 ring-blue-500/25' : ''}`}>
               <div className="p-5 md:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-6">
                 <div className="flex-1 cursor-pointer" onClick={() => toggleSeason(s)}>
                   <div className="flex flex-wrap items-center gap-3 mb-2">
                     <span className="text-xl md:text-2xl font-black text-white tracking-tighter uppercase">Saison {s.season_number}</span>
                     {(() => {
-                      const badge = getRequestStatusBadge(s.status);
+                      const badge = getRequestStatusBadge(s.status, s.media_type);
                       return (
                         <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest border ${badge.className}`}>
                           {badge.label}
@@ -430,56 +432,91 @@ export function TvShowRequestPage() {
                       );
                     })()}
                   </div>
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[9px] md:text-[10px] font-black text-gray-600 uppercase tracking-widest">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[9px] md:text-[10px] font-black text-blue-400/70 uppercase tracking-widest">
                     <span className="flex items-center gap-2"><Clock size={12} /> Prochain: E{s.next_episode_number}</span>
                     {s.requested_by && <span className="flex items-center gap-2"><Tag size={12} /> Demandé par {s.requested_by}</span>}
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-2 md:gap-3">
-                  <button onClick={() => openHistory(s)} className="px-2.5 md:px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-gray-400 font-black text-[9px] md:text-[10px] uppercase tracking-widest transition-all">Historique</button>
-                  <button onClick={() => openSeasonSearchModal(s)} className="px-3 md:px-4 py-2 bg-white/5 hover:bg-blue-600 rounded-xl text-white font-black text-[9px] md:text-[10px] uppercase tracking-widest transition-all flex items-center gap-2"><Search size={12} /> Manuel</button>
+                  <button onClick={() => openHistory(s)} className="px-2.5 md:px-4 py-2 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-300 hover:bg-blue-600/20 font-black text-[9px] md:text-[10px] uppercase tracking-widest transition-all">Historique</button>
+                  <button onClick={() => openSeasonSearchModal(s)} disabled={!canManageSeason(s)} className="px-3 md:px-4 py-2 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-300 hover:bg-blue-600/20 font-black text-[9px] md:text-[10px] uppercase tracking-widest transition-all flex items-center gap-2 disabled:opacity-20"><Search size={12} /> Manuel</button>
                   <button onClick={() => autoDownloadSeason(s)} className="px-4 md:px-6 py-2 premium-gradient rounded-xl text-white font-black text-[9px] md:text-[10px] uppercase tracking-widest shadow-lg shadow-blue-600/20 hover:scale-[1.02] transition-all">Auto Scan</button>
-                  <button onClick={() => deleteSeason(s)} disabled={!canManageSeason(s)} className="p-1.5 md:p-2 bg-red-600/5 hover:bg-red-600/10 rounded-xl text-red-400 transition-all disabled:opacity-20"><Trash2 size={18} /></button>
+                  <button onClick={() => deleteSeason(s)} disabled={!canManageSeason(s)} className="p-1.5 md:p-2 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 hover:bg-red-500/20 transition-all disabled:opacity-20"><Trash2 size={18} /></button>
                 </div>
               </div>
 
               {expandedSeasonIds.has(s.id) && (
-                <div className="bg-black/20 border-t border-white/5 p-6 animate-premium-fade">
-                  <div className="flex items-center justify-between mb-8">
-                    <div className="flex items-center gap-6">
-                      <div className="flex flex-col"><span className="text-[9px] font-black text-gray-600 uppercase tracking-widest mb-1">Indexés</span><span className="text-green-400 font-black">{(presenceBySeasonId[s.id]?.present_episodes || []).length}</span></div>
-                      <div className="flex flex-col"><span className="text-[9px] font-black text-gray-600 uppercase tracking-widest mb-1">Actifs</span><span className="text-blue-400 font-black">{(presenceBySeasonId[s.id]?.downloading_episodes || []).length}</span></div>
-                      <div className="flex flex-col"><span className="text-[9px] font-black text-gray-600 uppercase tracking-widest mb-1">Manquants</span><span className="text-gray-400 font-black">{(presenceBySeasonId[s.id]?.missing_episodes || []).length}</span></div>
+                <div className="bg-gradient-to-b from-blue-950/30 to-transparent border-t border-blue-500/10 p-6 animate-premium-fade">
+                  {(() => {
+                    const seasonError = formatRequestErrorMessage(s.last_error);
+                    if (!seasonError) return null;
+                    return (
+                      <div className="mb-6 p-4 bg-red-600/10 border border-red-600/20 rounded-2xl">
+                        <p className="text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">Problème détecté</p>
+                        <p className="text-sm text-red-200/90 font-medium">{seasonError}</p>
+                      </div>
+                    );
+                  })()}
+                  <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="px-3 py-2 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
+                        <span className="text-[9px] font-black text-emerald-400/80 uppercase tracking-widest block mb-0.5">Indexés</span>
+                        <span className="text-emerald-300 font-black text-sm">{(presenceBySeasonId[s.id]?.present_episodes || []).length}</span>
+                      </div>
+                      <div className="px-3 py-2 rounded-2xl bg-sky-500/10 border border-sky-500/20">
+                        <span className="text-[9px] font-black text-sky-400/80 uppercase tracking-widest block mb-0.5">Actifs</span>
+                        <span className="text-sky-300 font-black text-sm">{(presenceBySeasonId[s.id]?.downloading_episodes || []).length}</span>
+                      </div>
+                      <div className="px-3 py-2 rounded-2xl bg-red-500/10 border border-red-500/20">
+                        <span className="text-[9px] font-black text-red-400/80 uppercase tracking-widest block mb-0.5">{SEASON_FAILED_COUNTER_LABEL}</span>
+                        <span className="text-red-300 font-black text-sm">{(presenceBySeasonId[s.id]?.error_episodes || []).length}</span>
+                      </div>
+                      <div className="px-3 py-2 rounded-2xl bg-blue-600/10 border border-blue-500/20">
+                        <span className="text-[9px] font-black text-blue-400/80 uppercase tracking-widest block mb-0.5">Manquants</span>
+                        <span className="text-blue-200 font-black text-sm">{(presenceBySeasonId[s.id]?.missing_episodes || []).length}</span>
+                      </div>
                     </div>
-                    <button onClick={() => loadSeasonPresence(s, true)} className="p-2 bg-white/5 hover:bg-white/10 rounded-xl text-gray-500 transition-all text-xs font-bold uppercase tracking-widest">Actualiser</button>
+                    <button onClick={() => loadSeasonPresence(s, true)} className="px-3 py-2 rounded-2xl bg-blue-600/10 border border-blue-500/25 text-blue-300 hover:bg-blue-600/20 hover:border-blue-500/40 transition-all text-[10px] font-black uppercase tracking-widest">Actualiser</button>
                   </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     {episodesLoadingSeasonId === s.id ? (
-                      <div className="col-span-full py-10 text-center animate-pulse text-gray-500 font-black uppercase text-[10px] tracking-widest">
+                      <div className="col-span-full py-10 text-center animate-pulse text-blue-400/50 font-black uppercase text-[10px] tracking-widest">
                         Chargement des épisodes...
                       </div>
                     ) : (episodesBySeasonId[s.id] || []).length > 0 ? (episodesBySeasonId[s.id] || []).map((ep) => {
                       const isPresent = (presenceBySeasonId[s.id]?.present_episodes || []).includes(ep.episode_number);
                       const isDownloading = (presenceBySeasonId[s.id]?.downloading_episodes || []).includes(ep.episode_number);
+                      const isFailed = (presenceBySeasonId[s.id]?.error_episodes || []).includes(ep.episode_number);
                       return (
-                        <div key={ep.episode_number} className="glass-card p-4 border-white/5 hover:bg-white/5 transition-all flex items-center justify-between group">
+                        <div key={ep.episode_number} className="soft-card-interactive p-4 flex items-center justify-between group">
                           <div className="min-w-0">
                             <div className="text-white font-bold text-sm mb-1 truncate">E{String(ep.episode_number).padStart(2, '0')} — {ep.name}</div>
-                            <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{formatDate(ep.air_date)}</div>
+                            <div className="text-[10px] font-bold text-blue-400/70 uppercase tracking-widest">{formatDate(ep.air_date)}</div>
+                            {isFailed && (
+                              <p className="mt-2 text-[10px] text-red-300/80 font-medium leading-snug max-w-md">{EPISODE_RETRY_HINT}</p>
+                            )}
                           </div>
-                          <div className="flex items-center gap-3">
-                            {isPresent ? <div className="px-3 py-1 bg-green-500/10 rounded-lg text-green-400 text-[9px] font-black uppercase tracking-widest">Présent</div>
-                              : isDownloading ? <div className="px-3 py-1 bg-blue-500/10 rounded-lg text-blue-400 text-[9px] font-black uppercase tracking-widest animate-pulse">Réception...</div>
-                                : <>
-                                  <button onClick={() => autoDownloadEpisode(s, ep.episode_number)} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-white text-[9px] font-black uppercase tracking-widest transition-all">Auto</button>
-                                  <button onClick={() => openEpisodeSearchModal(s, ep.episode_number)} disabled={!canManageSeason(s)} className="px-3 py-1.5 bg-white/5 hover:bg-blue-600 rounded-lg text-white text-[9px] font-black uppercase tracking-widest transition-all disabled:opacity-20 flex items-center gap-2"><Search size={12} /> Manuel</button>
-                                </>}
+                          <div className="flex items-center gap-3 flex-shrink-0">
+                            {isPresent ? <div className="px-3 py-1 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-[9px] font-black uppercase tracking-widest">Présent</div>
+                              : isDownloading ? <div className="px-3 py-1 rounded-xl border border-sky-500/30 bg-sky-500/10 text-sky-300 text-[9px] font-black uppercase tracking-widest animate-pulse">Réception...</div>
+                                : isFailed ? (
+                                  <>
+                                    <div className="px-3 py-1 rounded-xl border border-red-500/30 bg-red-500/10 text-red-300 text-[9px] font-black uppercase tracking-widest" title={EPISODE_RETRY_HINT}>{EPISODE_FAILED_LABEL}</div>
+                                    <button onClick={() => autoDownloadEpisode(s, ep.episode_number)} className="px-3 py-1.5 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-300 hover:bg-blue-600/20 text-[9px] font-black uppercase tracking-widest transition-all">Auto</button>
+                                    <button onClick={() => openEpisodeSearchModal(s, ep.episode_number)} disabled={!canManageSeason(s)} className="px-3 py-1.5 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-300 hover:bg-blue-600/20 text-[9px] font-black uppercase tracking-widest transition-all disabled:opacity-20 flex items-center gap-2"><Search size={12} /> Manuel</button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button onClick={() => autoDownloadEpisode(s, ep.episode_number)} className="px-3 py-1.5 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-300 hover:bg-blue-600/20 text-[9px] font-black uppercase tracking-widest transition-all">Auto</button>
+                                    <button onClick={() => openEpisodeSearchModal(s, ep.episode_number)} disabled={!canManageSeason(s)} className="px-3 py-1.5 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-300 hover:bg-blue-600/20 text-[9px] font-black uppercase tracking-widest transition-all disabled:opacity-20 flex items-center gap-2"><Search size={12} /> Manuel</button>
+                                  </>
+                                )}
                           </div>
                         </div>
                       );
                     }) : (
-                      <div className="col-span-full py-10 text-center text-gray-600 font-black uppercase text-[10px] tracking-widest opacity-50">
+                      <div className="col-span-full py-10 text-center text-blue-400/40 font-black uppercase text-[10px] tracking-widest">
                         Aucun épisode trouvé pour cette saison
                       </div>
                     )}

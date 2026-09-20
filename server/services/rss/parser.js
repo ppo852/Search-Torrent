@@ -102,6 +102,9 @@ export async function parseRSSFeed(url) {
                       case 'size':
                         torznabAttrs.size = parseInt(attr.$.value, 10) || 0;
                         break;
+                      case 'infohash':
+                        torznabAttrs.infohash = String(attr.$.value || '').trim().toLowerCase();
+                        break;
                     }
                   }
                 }
@@ -135,6 +138,7 @@ export async function parseRSSFeed(url) {
                 torrent: (item.enclosure && item.enclosure.$ && item.enclosure.$.url) ? item.enclosure.$.url : (item.link ? item.link[0] : ''),
                 feedName: channel && channel.title ? channel.title[0] : '',
                 size: (item.enclosure && item.enclosure[0] && item.enclosure[0].$ && item.enclosure[0].$.length) ? parseInt(item.enclosure[0].$.length, 10) : (torznabAttrs.size || 0),
+                infohash: torznabAttrs.infohash || undefined,
                 torznab_attr: Object.keys(torznabAttrs).length > 0 ? torznabAttrs : undefined
               };
             }).filter(item => item !== null); // Filtrer les éléments null

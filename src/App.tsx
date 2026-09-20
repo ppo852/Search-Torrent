@@ -9,6 +9,8 @@ import { HomePage } from './pages/HomePage';
 import { NewTorrentPage } from './pages/NewTorrentPage';
 import { QBittorrentPage } from './pages/QBittorrentPage';
 import { MediaDetailPage } from './pages/MediaDetailPage';
+import { TmdbBrowsePage } from './pages/TmdbBrowsePage';
+import { RssDownloadBrowsePage } from './pages/RssDownloadBrowsePage';
 import { LibraryPage } from './pages/LibraryPage';
 import { RequestDetailPage } from './pages/RequestDetailPage';
 import { TvShowRequestPage } from './pages/TvShowRequestPage';
@@ -59,7 +61,10 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
-  const { user } = useAuthStore();
+  const { user, token } = useAuthStore();
+  if (!token) {
+    return <Navigate to="/login" />;
+  }
   if (!user?.is_admin) {
     return <Navigate to="/" />;
   }
@@ -93,6 +98,30 @@ export function App() {
               element={
                 <PrivateRoute>
                   <NewTorrentPage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/films/:kind"
+              element={
+                <PrivateRoute>
+                  <TmdbBrowsePage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/series/:kind"
+              element={
+                <PrivateRoute>
+                  <TmdbBrowsePage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/a-telecharger/:kind"
+              element={
+                <PrivateRoute>
+                  <RssDownloadBrowsePage />
                 </PrivateRoute>
               }
             />

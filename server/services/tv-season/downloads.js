@@ -1,5 +1,21 @@
 import { randomUUID } from 'crypto';
-import { run } from '../core/db.js';
+import { run, query } from '../core/db.js';
+import { clearCalendarCache } from '../calendar/index.js';
+
+/**
+ * Statut saison pour l'UI :
+ * - `downloading` si ≥1 épisode déjà suivi (DL / envoyé / terminé partiel) → badge « En cours »
+ * - `monitoring` sinon (rien trouvé encore) → badge « En attente »
+ * @param {string} requestId
+ * @returns {Promise<'downloading'|'monitoring'>}
+ */
+export async function resolveTvSeasonInProgressStatus(requestId) {
+  const rows = await query(
+    `SELECT 1 AS ok FROM tv_episode_downloads WHERE tv_season_request_id = ? LIMIT 1`,
+    [requestId]
+  );
+  return (rows || []).length > 0 ? 'downloading' : 'monitoring';
+}
 
 /**
  * @param {{
@@ -138,13 +154,13 @@ export async function markTvSeasonRequestCompleted({ requestId, userId, complete
        WHERE id = ? AND user_id = ?`,
       [now, now, requestId, userId]
     );
-    return;
+  } else {
+    await run(
+      `UPDATE tv_season_requests
+       SET status = 'completed', completed_at = COALESCE(completed_at, ?), last_checked_at = ?, last_error = NULL
+       WHERE id = ?`,
+      [now, now, requestId]
+    );
   }
-
-  await run(
-    `UPDATE tv_season_requests
-     SET status = 'completed', completed_at = COALESCE(completed_at, ?), last_checked_at = ?, last_error = NULL
-     WHERE id = ?`,
-    [now, now, requestId]
-  );
+  clearCalendarCache();
 }

@@ -3,6 +3,7 @@ import { useAuthStore } from '../stores/authStore';
 import { api } from '../services/api';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { showErrorToast, showInfoToast, showToast, isSoftApiError, getApiErrorMessage } from '../stores/toastStore';
+import { resolveForceDownloadPermission } from '../lib/force-download-permission';
 
 export interface InteractiveDownloadParams {
   url: string;
@@ -48,17 +49,7 @@ export function useInteractiveTorrentDownload() {
 
       let canForceLive = canForce;
       if (isDuplicate && !force && userId) {
-        try {
-          const freshUser = await api.getUser(userId);
-          canForceLive = !!freshUser?.allow_force_interactive_download;
-          if (canForceLive !== canForce) {
-            useAuthStore.getState().patchUser({
-              allow_force_interactive_download: canForceLive,
-            });
-          }
-        } catch {
-          // Garder la valeur locale si la relecture échoue
-        }
+        canForceLive = await resolveForceDownloadPermission({ userId, canForce });
       }
 
       if (isDuplicate && canForceLive && !force) {
@@ -69,7 +60,7 @@ export function useInteractiveTorrentDownload() {
       }
 
       if (isDuplicate) {
-        showInfoToast('Ce média est déjà dans la médiathèque');
+        showInfoToast('Ce média est déjà dans Emby');
       } else {
         showErrorToast(getApiErrorMessage(error, 'Échec du transfert'));
       }
@@ -94,7 +85,7 @@ export function useInteractiveTorrentDownload() {
     <ConfirmModal
       isOpen={showConfirm}
       title="Média déjà présent"
-      message={`« ${pendingName} » semble déjà être dans la médiathèque (disque ou Emby). Voulez-vous quand même lancer le téléchargement ?`}
+      message={`« ${pendingName} » semble déjà être dans Emby. Voulez-vous quand même lancer le téléchargement ?`}
       confirmLabel="Forcer"
       cancelLabel="Annuler"
       onConfirm={handleConfirmForce}

@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Sidebar } from './Sidebar';
 import { ToastHost } from './ToastHost';
 import { WhatsNewHost } from './WhatsNewHost';
+import { OrganizrSessionSync } from '../auth/OrganizrSessionSync';
 import { useAuthStore } from '../../stores/authStore';
 import { useLocation } from 'react-router-dom';
 import { fetchRequestStatus } from '../../hooks/useRequestStatus';
@@ -47,22 +48,24 @@ export function Layout({ children }: LayoutProps) {
   }
 
   const shellClass = inIframe
-    ? 'flex flex-col lg:flex-row h-[100dvh] max-h-[100dvh] overflow-hidden bg-gray-950 text-gray-100'
-    : 'flex min-h-[100dvh] bg-gray-950 text-gray-100';
+    ? 'flex flex-col lg:flex-row h-[100dvh] max-h-[100dvh] overflow-hidden bg-gradient-to-b from-gray-950 via-blue-950/40 to-gray-950 text-gray-100'
+    : 'flex min-h-[100dvh] bg-gradient-to-b from-gray-950 via-blue-950/40 to-gray-950 text-gray-100';
 
   const mainClass = inIframe
     ? 'flex-1 flex flex-col min-h-0 min-w-0 overflow-y-auto transition-all duration-500 pb-0 lg:pb-0 ml-0 lg:ml-20 xl:ml-72'
     : 'flex-1 flex flex-col min-w-0 transition-all duration-500 pb-20 lg:pb-0 ml-0 lg:ml-20 xl:ml-72';
 
   return (
-    <div className={shellClass}>
-      <Sidebar inIframe={inIframe} navRouteKey={location.pathname} />
+    <OrganizrSessionSync>
+      <div className={shellClass}>
+        <Sidebar inIframe={inIframe} navRouteKey={location.pathname} />
 
-      <main className={mainClass}>
-        <div className="flex-1 p-4 md:p-8">{children}</div>
-      </main>
-      <ToastHost />
-      <WhatsNewHost />
-    </div>
+        <main className={mainClass}>
+          <div className="flex-1 p-4 md:p-8">{children}</div>
+        </main>
+        <ToastHost />
+        <WhatsNewHost />
+      </div>
+    </OrganizrSessionSync>
   );
 }

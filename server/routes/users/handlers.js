@@ -173,6 +173,10 @@ export async function updateUserHandler(req, res) {
     
     // Seul un admin peut changer le statut admin d'un utilisateur
     if (typeof is_admin !== 'undefined' && req.user.is_admin) {
+      // L'utilisateur admin principal ne peut pas perdre ses droits
+      if (existingUser.username === 'admin' && !is_admin) {
+        return res.status(403).json({ error: "Impossible de retirer les droits de l'administrateur principal" });
+      }
       updateFields.push('is_admin = ?');
       params.push(is_admin ? 1 : 0);
     }

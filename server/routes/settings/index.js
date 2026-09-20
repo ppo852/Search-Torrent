@@ -8,7 +8,8 @@ import {
   deleteSettingHandler,
   getGlobalSettingsHandler,
   getPublicSettingsHandler,
-  updateGlobalSettingsHandler
+  updateGlobalSettingsHandler,
+  generateCalendarApiKeyHandler
 } from './handlers.js';
 
 const settingsRouter = express.Router();
@@ -17,6 +18,7 @@ const settingsRouter = express.Router();
 settingsRouter.get('/global', authenticateToken, requireAdmin, getGlobalSettingsHandler);
 settingsRouter.put('/global', authenticateToken, requireAdmin, updateGlobalSettingsHandler);
 settingsRouter.get('/public', authenticateToken, getPublicSettingsHandler);
+settingsRouter.post('/calendar-api-key', authenticateToken, requireAdmin, generateCalendarApiKeyHandler);
 
 // Routes génériques pour tous les paramètres (admin uniquement)
 settingsRouter.get('/', authenticateToken, requireAdmin, getAllSettingsHandler);

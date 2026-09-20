@@ -21,6 +21,18 @@
     @apply bg-gradient-to-br from-blue-600 via-violet-600 to-fuchsia-600;
   }
 
+  .soft-card {
+    @apply rounded-3xl border border-blue-500/10 bg-white/[0.02] shadow-[0_8px_32px_rgba(37,99,235,0.06)] transition-all;
+  }
+
+  .soft-card-interactive {
+    @apply soft-card hover:bg-blue-600/10 hover:border-blue-500/25;
+  }
+
+  .soft-menu {
+    @apply p-2 bg-gray-950 border border-blue-500/25 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] animate-premium-fade;
+  }
+
   .text-gradient {
     @apply bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-violet-400 to-fuchsia-400;
   }

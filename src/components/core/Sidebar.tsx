@@ -42,6 +42,11 @@ export function Sidebar({
     refetchInterval: 5000
   });
 
+  const diskPercentUsed = Math.min(
+    100,
+    Math.max(0, Number(stats?.disk?.percentUsed) || 0)
+  );
+
   return (
     <>
       {/* Sidebar Desktop */}
@@ -64,7 +69,7 @@ export function Sidebar({
           )}
           <button 
             onClick={() => setCollapsed(!collapsed)}
-            className="p-2.5 bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl text-gray-500 hover:text-white transition-all duration-300 shadow-xl"
+            className="p-2.5 rounded-xl bg-blue-600/15 border border-blue-500/30 text-blue-300 hover:bg-blue-600/25 hover:text-blue-200 hover:border-blue-500/50 transition-all duration-300"
           >
             {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
           </button>
@@ -76,12 +81,13 @@ export function Sidebar({
             <NavLink
               key={item.name}
               to={item.href}
+              end={item.href === '/'}
               onClick={() => handleNavItemClick(item.href, resetSearch)}
               className={({ isActive }) => `
                 flex items-center gap-4 px-5 py-4 rounded-2xl transition-all duration-500 group relative overflow-hidden
                 ${isActive 
-                  ? 'bg-blue-600 text-white shadow-2xl shadow-blue-600/30 font-black' 
-                  : 'text-gray-500 hover:bg-white/5 hover:text-white font-bold'}
+                  ? 'bg-blue-600/20 text-blue-300 border border-blue-500/50 font-black shadow-[inset_0_0_0_1px_rgba(59,130,246,0.15)]' 
+                  : 'text-gray-500 border border-transparent hover:bg-blue-600/10 hover:text-blue-200 hover:border-blue-500/25 font-bold'}
               `}
             >
               <item.icon size={20} className={`shrink-0 transition-transform duration-500 ${!collapsed && 'group-hover:scale-110'}`} />
@@ -94,14 +100,13 @@ export function Sidebar({
 
           {user?.is_admin && (
             <div className="pt-10">
-              {!collapsed && <p className="px-5 mb-4 text-[9px] font-black text-gray-600 uppercase tracking-[0.4em]">PARAMÈTRES</p>}
               <NavLink
                 to="/admin"
                 className={({ isActive }) => `
                   flex items-center gap-4 px-5 py-4 rounded-2xl transition-all duration-500 group
                   ${isActive 
-                    ? 'bg-violet-600 text-white shadow-2xl shadow-violet-600/30 font-black' 
-                    : 'text-gray-500 hover:bg-white/5 hover:text-white font-bold'}
+                    ? 'bg-violet-600/20 text-violet-300 border border-violet-500/50 font-black' 
+                    : 'text-gray-500 border border-transparent hover:bg-violet-600/10 hover:text-violet-200 hover:border-violet-500/25 font-bold'}
                 `}
               >
                 <Settings size={20} className="shrink-0 transition-transform duration-500 group-hover:rotate-90" />
@@ -148,13 +153,29 @@ export function Sidebar({
                     <div className="flex items-center gap-1.5">
                       <HardDrive size={11} className="text-gray-400" />
                       <span className="text-[9px] text-gray-400 uppercase font-black tracking-widest">Stockage</span>
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ${
+                          diskPercentUsed > 90
+                            ? 'bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.8)]'
+                            : diskPercentUsed > 70
+                              ? 'bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.7)]'
+                              : 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]'
+                        }`}
+                        aria-hidden
+                      />
                     </div>
-                    <span className="text-[9px] font-black text-white">{stats.disk.percentUsed}%</span>
+                    <span className="text-[9px] font-black text-white">{diskPercentUsed}%</span>
                   </div>
-                  <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full transition-all duration-1000 ${stats.disk.percentUsed > 90 ? 'bg-red-500' : 'bg-blue-500'}`}
-                      style={{ width: `${stats.disk.percentUsed}%` }}
+                  <div className="h-2 w-full rounded-full overflow-hidden border border-white/10 bg-white/10 shadow-inner">
+                    <div
+                      className={`h-full rounded-full transition-all duration-1000 ${
+                        diskPercentUsed > 90
+                          ? 'bg-gradient-to-r from-orange-500 to-red-500'
+                          : diskPercentUsed > 70
+                            ? 'bg-gradient-to-r from-amber-400 to-orange-500'
+                            : 'bg-gradient-to-r from-emerald-500 to-cyan-400'
+                      }`}
+                      style={{ width: `${diskPercentUsed}%` }}
                     />
                   </div>
                   <p className="text-[9px] text-gray-400 font-bold uppercase tracking-tight text-right">
@@ -169,9 +190,9 @@ export function Sidebar({
         {/* User Area */}
         <div className="p-4 md:p-6 border-t border-white/5 bg-gray-950/20">
           {!collapsed && user ? (
-            <div className="flex items-center justify-between bg-white/5 border border-white/5 rounded-2xl p-2.5 group hover:border-white/10 transition-all duration-500">
+            <div className="glass-card flex items-center justify-between border-white/5 bg-white/[0.02] rounded-2xl p-2.5 group hover:border-blue-500/20 transition-all duration-500">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-xl bg-blue-600/10 border border-blue-500/20 flex items-center justify-center text-blue-500 font-black text-sm shadow-inner group-hover:scale-110 transition-transform duration-500 shrink-0">
+                <div className="w-8 h-8 rounded-xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-300 font-black text-sm group-hover:scale-110 transition-transform duration-500 shrink-0">
                   {user.username.substring(0, 1).toUpperCase()}
                 </div>
                 <div className="flex flex-col min-w-0">
@@ -183,7 +204,7 @@ export function Sidebar({
               <button
                 onClick={logout}
                 title="Déconnexion"
-                className="p-2 ml-2 text-gray-500 hover:text-white hover:bg-red-500 hover:shadow-[0_0_15px_rgba(239,68,68,0.5)] rounded-xl transition-all duration-300 shrink-0 group/logout"
+                className="p-2 ml-2 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-400/80 hover:bg-red-500/15 hover:border-red-500/30 hover:text-red-300 transition-all duration-300 shrink-0 group/logout"
               >
                 <LogOut size={16} className="transition-transform group-hover/logout:-translate-x-0.5" />
               </button>
@@ -192,7 +213,7 @@ export function Sidebar({
             <button
               onClick={logout}
               title="Déconnexion"
-              className="w-full flex items-center justify-center p-3 text-gray-500 hover:text-white hover:bg-red-500 hover:shadow-[0_0_15px_rgba(239,68,68,0.5)] rounded-xl transition-all duration-300"
+              className="w-full flex items-center justify-center p-3 rounded-xl bg-blue-600/15 border border-blue-500/30 text-blue-300 hover:bg-red-500/15 hover:border-red-500/30 hover:text-red-300 transition-all duration-300"
             >
               <LogOut size={20} />
             </button>
@@ -200,7 +221,7 @@ export function Sidebar({
 
           {!collapsed && (
             <div className="mt-4 flex justify-center">
-              <span className="px-2 py-1 bg-white/5 border border-white/5 rounded-md text-[9px] font-black text-gray-500 tracking-widest cursor-default hover:text-white transition-colors">
+              <span className="px-2.5 py-1 rounded-lg bg-blue-500/15 border border-blue-500/30 text-[9px] font-black text-blue-300 tracking-widest cursor-default hover:bg-blue-500/25 hover:text-blue-200 transition-colors">
                 v{packageJson.version}
               </span>
             </div>

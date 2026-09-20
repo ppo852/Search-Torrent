@@ -64,13 +64,15 @@ export async function isSeasonFullyPresent({ tmdbId, title, season }) {
 }
 
 /**
- * Vérifie si un téléchargement interactif doit être bloqué (média déjà en médiathèque).
+ * Vérifie si un téléchargement doit être bloqué (média déjà en médiathèque).
+ * Utilisé par Télécharger (interactif) et Manuel → send-to-qbit (demandes).
  * - Film + tmdbId : TMDB
  * - Épisode + tmdbId : TMDB + S/E
  * - Pack saison + tmdbId : bloque seulement si saison (épisodes diffusés) complète
  * - Sans tmdbId : fallback nom torrent
+ * - title / year optionnels : métadonnées fiables d'une demande (prioritaires sur le parse nom)
  *
- * @returns {{ blocked: boolean, status?: number, error?: string, details?: string, forced?: boolean }}
+ * @returns {{ blocked: boolean, status?: number, error?: string, details?: string, present?: boolean, matches?: any[], forced?: boolean }}
  */
 export async function checkInteractiveInventoryDuplicate({
   torrentName,
@@ -80,27 +82,37 @@ export async function checkInteractiveInventoryDuplicate({
   mediaType,
   seasonNumber,
   episodeNumber,
+  title: titleOverride,
+  year: yearOverride,
 }) {
-  if (!torrentName && !(Number(tmdbId) > 0)) {
+  const overrideTitle = typeof titleOverride === 'string' ? titleOverride.trim() : '';
+  if (!torrentName && !overrideTitle && !(Number(tmdbId) > 0)) {
     return { blocked: false };
   }
 
   try {
     const parsed = torrentName ? await parseTorrentSafe(torrentName) : null;
-    const lookupTitle = parsed?.title ? String(parsed.title).trim() : '';
-    const fallbackTitle = lookupTitle ? cleanMediaTitle(parsed.title) : '';
-    const displayTitle = fallbackTitle || lookupTitle || torrentName || 'Ce média';
-    const year = parsed?.year ?? extractYear(lookupTitle) ?? extractYear(torrentName);
+    const parsedTitle = parsed?.title ? String(parsed.title).trim() : '';
+    const lookupTitle = overrideTitle || parsedTitle;
+    const fallbackTitle = parsedTitle ? cleanMediaTitle(parsed.title) : (overrideTitle ? cleanMediaTitle(overrideTitle) : '');
+    const displayTitle = overrideTitle || fallbackTitle || parsedTitle || torrentName || 'Ce média';
+    const year =
+      (Number.isInteger(Number(yearOverride)) && Number(yearOverride) > 0 ? Number(yearOverride) : null) ??
+      parsed?.year ??
+      extractYear(lookupTitle) ??
+      extractYear(torrentName);
     const isTvFromName = !!(
       parsed?.episode ||
       parsed?.season ||
-      (torrentName && (/s\d+/i.test(torrentName) || /e\d+/i.test(torrentName) || /season/i.test(torrentName)))
+      (torrentName && (/s\d+/i.test(torrentName) || /e\d+/i.test(torrentName) || /season/i.test(torrentName))) ||
+      (mediaType && ['tv', 'anime'].includes(String(mediaType).toLowerCase()))
     );
     const kind = resolveKind(mediaType, isTvFromName);
     const id = Number(tmdbId);
     const hasTmdb = Number.isInteger(id) && id > 0;
 
     let present = false;
+    let matches = [];
     let detailsHint = `Le média "${displayTitle}" semble déjà disponible (disque ou Emby).`;
 
     // --- Chemin fiable : TMDB de la fiche (pochette) ---
@@ -113,6 +125,7 @@ export async function checkInteractiveInventoryDuplicate({
           year,
         });
         present = !!r?.present;
+        if (present) matches = r.matches || [];
       } else {
         const explicitSeason = Number(seasonNumber);
         const explicitEpisode = Number(episodeNumber);
@@ -143,6 +156,7 @@ export async function checkInteractiveInventoryDuplicate({
             episode: episodeNum,
           });
           present = !!r?.present;
+          if (present) matches = r.matches || [];
         } else if (hasSeasonOnly) {
           // Pack saison : bloque seulement si saison déjà complète (épisodes diffusés)
           present = await isSeasonFullyPresent({
@@ -151,7 +165,7 @@ export async function checkInteractiveInventoryDuplicate({
             season: seasonNum,
           });
           if (present) {
-            detailsHint = `La saison ${seasonNum} de "${displayTitle}" est déjà complète en médiathèque (disque ou Emby).`;
+            detailsHint = `La saison ${seasonNum} de "${displayTitle}" est déjà complète sur Emby.`;
           }
         } else {
           // Nom flou sans S/E : ne pas bloquer sur TMDB seul
@@ -164,23 +178,31 @@ export async function checkInteractiveInventoryDuplicate({
     if (!present && lookupTitle) {
       const presenceArgs = {
         year,
-        season: parsed?.season,
-        episode: parsed?.episode,
+        season: parsed?.season ?? (Number(seasonNumber) > 0 ? Number(seasonNumber) : undefined),
+        episode: parsed?.episode ?? (Number(episodeNumber) > 0 ? Number(episodeNumber) : undefined),
         kind,
       };
 
       let r = await mediaInventory.isPresent({ title: lookupTitle, ...presenceArgs });
       present = !!r?.present;
+      if (present) matches = r.matches || [];
 
       if (!present && fallbackTitle && fallbackTitle !== lookupTitle) {
         r = await mediaInventory.isPresent({ title: fallbackTitle, ...presenceArgs });
         present = !!r?.present;
+        if (present) matches = r.matches || [];
       }
 
-      const isTvButIncomplete =
-        kind === 'tv' && parsed?.season == null && parsed?.episode == null;
+      const hasExplicitEpisode =
+        (Number.isInteger(Number(episodeNumber)) && Number(episodeNumber) > 0) ||
+        parsed?.episode != null;
+      const hasExplicitSeason =
+        (Number.isInteger(Number(seasonNumber)) && Number(seasonNumber) > 0) ||
+        parsed?.season != null;
+      const isTvButIncomplete = kind === 'tv' && !hasExplicitSeason && !hasExplicitEpisode;
       if (isTvButIncomplete) {
         present = false;
+        matches = [];
       }
     }
 
@@ -205,11 +227,13 @@ export async function checkInteractiveInventoryDuplicate({
     return {
       blocked: true,
       status: 409,
-      error: 'Déjà présent dans la médiathèque',
+      error: 'Déjà présent dans Emby',
       details: detailsHint,
+      present: true,
+      matches,
     };
   } catch (err) {
-    logger.error(`[InventoryCheck] Erreur lors de la vérification de "${torrentName}":`, err);
+    logger.error(`[InventoryCheck] Erreur lors de la vérification de "${torrentName || overrideTitle}":`, err);
     return { blocked: false };
   }
 }

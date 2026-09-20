@@ -1,56 +1,25 @@
 /**
  * Détection et catégorisation torrents (UI + qBittorrent).
- * Noms officiels qBit : shared/qbit-categories.json
+ * normalize / infer / resolve : shared/qbit-categories.js
+ * getCategoryLabel : détection Prowlarr / nom de fichier (UI uniquement).
  */
 
 import qbitConfig from '../../shared/qbit-categories.json';
+import {
+  QBIT_CATEGORIES,
+  normalizeQbitCategory,
+  inferQbitCategoryFromMediaType,
+  resolveQbitCategory,
+} from '../../shared/qbit-categories.js';
 
-export const QBIT_CATEGORIES = qbitConfig.canonical;
+export {
+  QBIT_CATEGORIES,
+  normalizeQbitCategory,
+  inferQbitCategoryFromMediaType,
+  resolveQbitCategory,
+};
 
-export type CategoryResult = typeof QBIT_CATEGORIES[keyof typeof QBIT_CATEGORIES];
-
-const CANONICAL = new Set<string>(Object.values(QBIT_CATEGORIES));
-
-const ALIASES = new Map<string, CategoryResult>(
-  Object.entries(qbitConfig.aliases).map(([alias, key]) => [
-    alias,
-    QBIT_CATEGORIES[key as keyof typeof QBIT_CATEGORIES],
-  ])
-);
-
-function normalizeKey(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-}
-
-export function normalizeQbitCategory(value?: string | null): CategoryResult | null {
-  if (!value || typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (CANONICAL.has(trimmed)) return trimmed as CategoryResult;
-
-  const key = normalizeKey(trimmed);
-  return ALIASES.get(key) ?? null;
-}
-
-export function inferQbitCategoryFromMediaType(mediaType?: string | null): CategoryResult | null {
-  if (mediaType === 'movie') return QBIT_CATEGORIES.MOVIES;
-  if (mediaType === 'animation') return QBIT_CATEGORIES.ANIMATION;
-  if (mediaType === 'anime') return QBIT_CATEGORIES.ANIME;
-  if (mediaType === 'tv') return QBIT_CATEGORIES.TV;
-  if (mediaType === 'music') return QBIT_CATEGORIES.MUSIC;
-  if (mediaType === 'software') return QBIT_CATEGORIES.SOFTWARE;
-  if (mediaType === 'books' || mediaType === 'book') return QBIT_CATEGORIES.BOOKS;
-  if (mediaType === 'game' || mediaType === 'games') return QBIT_CATEGORIES.GAMES;
-  return null;
-}
-
-export function resolveQbitCategory(value?: string | null, mediaType?: string | null): CategoryResult | null {
-  return normalizeQbitCategory(value) || inferQbitCategoryFromMediaType(mediaType) || null;
-}
+export type CategoryResult = (typeof qbitConfig.canonical)[keyof typeof qbitConfig.canonical];
 
 export function isGameCategoryId(categoryId?: number): boolean {
   if (!categoryId) return false;
@@ -75,69 +44,69 @@ export function getCategoryLabel(
 ): CategoryResult {
   if (forcedType) {
     const fromForced = inferQbitCategoryFromMediaType(forcedType);
-    if (fromForced) return fromForced;
+    if (fromForced) return fromForced as CategoryResult;
   }
 
   if (categoryId) {
-    if (categoryId === 5070) return QBIT_CATEGORIES.ANIME;
-    if (categoryId >= 2000 && categoryId < 3000) return QBIT_CATEGORIES.MOVIES;
-    if (categoryId >= 5000 && categoryId < 6000) return QBIT_CATEGORIES.TV;
-    if (categoryId >= 3000 && categoryId < 4000) return QBIT_CATEGORIES.MUSIC;
-    if (isGameCategoryId(categoryId)) return QBIT_CATEGORIES.GAMES;
-    if (categoryId >= 4000 && categoryId < 5000) return QBIT_CATEGORIES.SOFTWARE;
-    if (categoryId >= 7000 && categoryId < 8000) return QBIT_CATEGORIES.BOOKS;
+    if (categoryId === 5070) return QBIT_CATEGORIES.ANIME as CategoryResult;
+    if (categoryId >= 2000 && categoryId < 3000) return QBIT_CATEGORIES.MOVIES as CategoryResult;
+    if (categoryId >= 5000 && categoryId < 6000) return QBIT_CATEGORIES.TV as CategoryResult;
+    if (categoryId >= 3000 && categoryId < 4000) return QBIT_CATEGORIES.MUSIC as CategoryResult;
+    if (isGameCategoryId(categoryId)) return QBIT_CATEGORIES.GAMES as CategoryResult;
+    if (categoryId >= 4000 && categoryId < 5000) return QBIT_CATEGORIES.SOFTWARE as CategoryResult;
+    if (categoryId >= 7000 && categoryId < 8000) return QBIT_CATEGORIES.BOOKS as CategoryResult;
   }
 
   const catStr = (categoryDesc || '').toLowerCase();
   const nameStr = (fileName || '').toLowerCase();
 
   if (/\banime\b/i.test(catStr)) {
-    return QBIT_CATEGORIES.ANIME;
+    return QBIT_CATEGORIES.ANIME as CategoryResult;
   }
 
   if (/\banimation\b|\banimated\b/i.test(catStr)) {
-    return QBIT_CATEGORIES.ANIMATION;
+    return QBIT_CATEGORIES.ANIMATION as CategoryResult;
   }
 
   if (/music|musique|audio|flac|mp3|album|lossless|soundtrack/i.test(catStr) ||
       (/\.mp3|-mp3|flac|lossless/i.test(nameStr))) {
-    return QBIT_CATEGORIES.MUSIC;
+    return QBIT_CATEGORIES.MUSIC as CategoryResult;
   }
 
   if (/movie|film|cinéma|cinema/i.test(catStr)) {
-    return QBIT_CATEGORIES.MOVIES;
+    return QBIT_CATEGORIES.MOVIES as CategoryResult;
   }
 
   if (/tv|série|serie|show|episode|saison|season/i.test(catStr) ||
       (/\bs\d{2}e\d{2}\b|saison \d+|season \d+/i.test(nameStr))) {
-    return QBIT_CATEGORIES.TV;
+    return QBIT_CATEGORIES.TV as CategoryResult;
   }
 
   if (/game|jeu|jeux|pc-game|gog|steam|ps4|ps5|xbox|switch|nintendo/i.test(catStr) ||
       /\b(game|games|jeu|jeux|gog|steam|fitgirl|codex|empress)\b/i.test(nameStr)) {
-    return QBIT_CATEGORIES.GAMES;
+    return QBIT_CATEGORIES.GAMES as CategoryResult;
   }
 
   if (/software|logiciel|logiciels|application|applications|app|utility|tool|pc\/|\/pc|windows|macos|linux|0day|osx/i.test(catStr)) {
-    return QBIT_CATEGORIES.SOFTWARE;
+    return QBIT_CATEGORIES.SOFTWARE as CategoryResult;
   }
 
   if (/book|livre|ebook|magazine|epub|pdf|comics|bd/i.test(catStr) ||
       (/\.epub|\.pdf|comics|mobi/i.test(nameStr))) {
-    return QBIT_CATEGORIES.BOOKS;
+    return QBIT_CATEGORIES.BOOKS as CategoryResult;
   }
 
   if (categoryDesc) {
     const normalized = normalizeQbitCategory(categoryDesc);
-    if (normalized) return normalized;
+    if (normalized) return normalized as CategoryResult;
   }
 
   if (searchContext === 'software') {
     if (isGameCategoryId(categoryId) || isLikelyGameText(categoryDesc, fileName)) {
-      return QBIT_CATEGORIES.GAMES;
+      return QBIT_CATEGORIES.GAMES as CategoryResult;
     }
-    return QBIT_CATEGORIES.SOFTWARE;
+    return QBIT_CATEGORIES.SOFTWARE as CategoryResult;
   }
 
-  return QBIT_CATEGORIES.OTHER;
+  return QBIT_CATEGORIES.OTHER as CategoryResult;
 }

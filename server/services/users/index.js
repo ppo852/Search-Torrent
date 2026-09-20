@@ -100,8 +100,44 @@ export async function getAllUsers() {
   }
 }
 
+/**
+ * Récupère un utilisateur par nom d'utilisateur (sans secrets)
+ * @param {string} username
+ * @returns {Promise<Object|null>}
+ */
+export async function getUserByUsername(username) {
+  try {
+    if (!username || typeof username !== 'string') {
+      return null;
+    }
+
+    const user = await get(
+      `SELECT id, username, is_admin, created_at, 
+       qbit_url, download_path_movies, download_path_series, download_path_anime, download_path_animation,
+       allow_force_interactive_download, last_seen_app_version,
+       (CASE WHEN qbit_api_key IS NOT NULL AND trim(qbit_api_key) != '' THEN 1 ELSE 0 END) AS has_qbit_api_key
+       FROM users WHERE username = ? COLLATE NOCASE`,
+      [username.trim()]
+    );
+
+    if (!user) return null;
+
+    return {
+      ...user,
+      is_admin: !!user.is_admin,
+      allow_force_interactive_download: !!user.allow_force_interactive_download,
+      has_qbit_api_key: !!user.has_qbit_api_key,
+      last_seen_app_version: user.last_seen_app_version || null
+    };
+  } catch (error) {
+    logger.error('Erreur lors de la récupération de l\'utilisateur par username:', error);
+    return null;
+  }
+}
+
 export default {
   verifyCredentials,
   getUserById,
+  getUserByUsername,
   getAllUsers
 };

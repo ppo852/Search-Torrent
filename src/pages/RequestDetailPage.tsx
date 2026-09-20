@@ -12,9 +12,13 @@ import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { globalSettings } from '../services/settings';
 import { showErrorToast, showToast } from '../stores/toastStore';
 import { getRequestStatusBadge } from '../lib/request-status-labels';
+import { formatRequestErrorMessage } from '../lib/request-error-messages';
+import { notifyMovieAutoSearchResult } from '../lib/movie-auto-search-toasts';
+import { isAlreadyPresentConflict, resolveForceDownloadPermission } from '../lib/force-download-permission';
+
+import type { MediaRequestStatus } from '../types';
 
 type MediaType = 'movie' | 'tv' | 'anime' | 'animation';
-type RequestStatus = 'pending' | 'found' | 'sent_to_qbit' | 'error' | 'completed' | 'monitoring';
 
 interface LibraryItem {
   id: string;
@@ -27,7 +31,7 @@ interface LibraryItem {
   monitored: boolean;
   created_at: string;
   requested_by?: string | null;
-  status?: RequestStatus;
+  status?: MediaRequestStatus;
   last_checked_at?: string | null;
   last_error?: string | null;
   matched_torrent_name?: string | null;
@@ -106,6 +110,7 @@ export function RequestDetailPage() {
     try {
       setAutoSearchLoading(true);
       const data = await api.autoSearchLibraryRequest(id);
+      notifyMovieAutoSearchResult(data?.result);
       if (data?.request) setItem(data.request);
       await load();
     } catch (e) {
@@ -157,22 +162,12 @@ export function RequestDetailPage() {
       setIsModalOpen(false);
       setForceAvailable(false);
     } catch (e: any) {
-      if (e?.status === 409) {
-        setModalError('Déjà présent dans la médiathèque');
-        let canForceLive = canForce;
-        if (user?.id) {
-          try {
-            const freshUser = await api.getUser(user.id);
-            canForceLive = !!freshUser?.allow_force_interactive_download;
-            if (canForceLive !== canForce) {
-              useAuthStore.getState().patchUser({
-                allow_force_interactive_download: canForceLive,
-              });
-            }
-          } catch {
-            /* garder la valeur locale */
-          }
-        }
+      if (isAlreadyPresentConflict(e)) {
+        setModalError('Déjà présent dans Emby');
+        const canForceLive = await resolveForceDownloadPermission({
+          userId: user?.id,
+          canForce,
+        });
         setForceAvailable(canForceLive);
       } else {
         setModalError('Erreur envoi');
@@ -232,30 +227,43 @@ export function RequestDetailPage() {
   );
 
   const canManage = Boolean(user?.is_admin || item.user_id === user?.id);
+  const requestErrorMessage = formatRequestErrorMessage(item.last_error);
 
   return (
     <div className="animate-premium-fade relative min-h-screen">
       {backdropPath && (
-        <div className="fixed inset-0 z-0">
-          <div className="absolute inset-0 bg-gray-950/80 backdrop-blur-3xl" />
-          <img src={backdropPath} alt="Backdrop" className="w-full h-full object-cover opacity-20" />
-          <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/60 to-transparent" />
+        <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+          <img
+            src={backdropPath}
+            alt=""
+            className="absolute inset-0 w-full h-full object-cover opacity-[0.28] scale-[1.02]"
+          />
+          <div className="absolute inset-0 bg-gray-950/50 backdrop-blur-[1px]" />
+          <div className="absolute inset-0 bg-gradient-to-b from-gray-950/75 via-transparent to-gray-950" />
+          <div className="absolute inset-0 bg-gradient-to-r from-gray-950/65 via-transparent to-gray-950/65" />
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                'radial-gradient(ellipse 85% 75% at 50% 40%, transparent 45%, rgba(3,7,18,0.3) 100%)',
+            }}
+          />
         </div>
       )}
 
       <div className="relative z-10 space-y-8">
         <div className="flex items-center justify-between">
-          <button onClick={() => navigate('/library')} className="flex items-center gap-2 text-gray-500 hover:text-white group transition-all">
-            <div className="p-2 bg-white/5 rounded-full group-hover:bg-white/10 transition-colors"><ArrowLeft size={18} /></div>
+          <button onClick={() => navigate('/library')} className="flex items-center gap-2 text-blue-400/70 hover:text-blue-200 group transition-all">
+            <div className="p-2 rounded-2xl bg-blue-600/10 border border-blue-500/20 group-hover:bg-blue-600/20 transition-colors"><ArrowLeft size={18} /></div>
             <span className="font-bold tracking-tight">Demandes</span>
           </button>
-          <button onClick={load} className="px-6 py-2 rounded-xl bg-white/5 border border-white/10 text-gray-400 font-bold hover:bg-white/10 transition-all uppercase text-[10px] tracking-widest">Rafraîchir</button>
+          <button onClick={load} className="px-6 py-2 rounded-2xl bg-blue-600/10 border border-blue-500/25 text-blue-300 font-bold hover:bg-blue-600/20 transition-all uppercase text-[10px] tracking-widest">Rafraîchir</button>
         </div>
 
-        <div className="glass-card p-8 border-white/5">
+        <div className="p-8 rounded-[2rem] border border-transparent bg-white/[0.03] shadow-[0_16px_64px_rgba(37,99,235,0.12)] backdrop-blur-xl">
           <div className="flex flex-col md:flex-row gap-10">
             <div className="w-32 md:w-48 lg:w-64 flex-shrink-0 mx-auto md:mx-0">
-              <div className="glass-card overflow-hidden shadow-2xl rotate-1">
+              <div className="overflow-hidden rounded-[1.75rem] shadow-[0_12px_40px_rgba(0,0,0,0.45)] rotate-1 ring-1 ring-blue-500/15">
                 {item.poster_url ? <img src={item.poster_url} alt={item.title} className="w-full h-auto object-cover" /> : <div className="aspect-[2/3] flex items-center justify-center bg-gray-900 text-gray-600 font-black uppercase text-xs">No Poster</div>}
               </div>
             </div>
@@ -264,15 +272,15 @@ export function RequestDetailPage() {
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <h1 className="text-2xl lg:text-3xl font-black text-white tracking-tighter uppercase mb-2">{item.title}</h1>
-                  <div className="flex flex-wrap items-center gap-4 text-xs font-bold text-gray-500 uppercase tracking-widest">
+                  <div className="flex flex-wrap items-center gap-4 text-xs font-bold text-blue-400/70 uppercase tracking-widest">
                     {item.release_date && <span>{item.release_date.split('-')[0]}</span>}
-                    {item.requested_by && <span className="flex items-center gap-2 text-blue-400/60"><CheckCircle2 size={14} />Par {item.requested_by}</span>}
+                    {item.requested_by && <span className="flex items-center gap-2"><CheckCircle2 size={14} />Par {item.requested_by}</span>}
                   </div>
                 </div>
                 {(() => {
-                  const badge = getRequestStatusBadge(item.status);
+                  const badge = getRequestStatusBadge(item.status, item.media_type);
                   return (
-                    <div className={`px-4 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-widest ${badge.className}`}>
+                    <div className={`px-4 py-1.5 rounded-2xl border text-[10px] font-black uppercase tracking-widest ${badge.className}`}>
                       {badge.label}
                     </div>
                   );
@@ -280,31 +288,44 @@ export function RequestDetailPage() {
               </div>
 
               <div className="space-y-2">
-                <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Synopsis</h3>
+                <h3 className="text-[10px] font-black text-blue-400/70 uppercase tracking-widest">Synopsis</h3>
                 <ExpandableText text={overview || "Aucune description."} maxLines={3} className="max-w-4xl" />
               </div>
 
-              <div className="pt-6 border-t border-white/5 flex flex-wrap items-center gap-4">
-                <button onClick={openSearchModal} disabled={!canManage} className="px-6 py-3 bg-white/5 border border-white/10 rounded-2xl text-white font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-white/10 transition-all disabled:opacity-30">
-                  <Search size={16} className="text-blue-500" />Indexation Manuelle
+              {requestErrorMessage && (
+                <div className="p-4 bg-red-600/10 border border-red-600/20 rounded-2xl">
+                  <p className="text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">Problème détecté</p>
+                  <p className="text-sm text-red-200/90 font-medium">{requestErrorMessage}</p>
+                </div>
+              )}
+
+              <div className="pt-6 border-t border-blue-500/10 flex flex-wrap items-center gap-4">
+                <button onClick={openSearchModal} disabled={!canManage} className="px-6 py-3 rounded-2xl bg-blue-600/10 border border-blue-500/25 text-blue-200 font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-blue-600/20 transition-all disabled:opacity-30">
+                  <Search size={16} className="text-blue-400" />Recherche Manuelle
                 </button>
                 <div className="flex-1" />
                 <button onClick={autoSearch} disabled={autoSearchLoading} className="px-8 py-3 premium-gradient rounded-2xl text-white font-black text-[10px] uppercase tracking-widest shadow-lg shadow-blue-600/20 hover:scale-[1.02] transition-all disabled:opacity-50">
                   {autoSearchLoading ? 'Scan...' : 'Scan Automatique'}
                 </button>
-                <button onClick={() => setIsDeleteModalOpen(true)} disabled={!canManage} className="p-3 bg-red-600/10 border border-red-600/20 rounded-2xl text-red-400 hover:bg-red-600/20 transition-all disabled:opacity-30" title="Supprimer"><Trash2 size={20} /></button>
+                <button onClick={() => setIsDeleteModalOpen(true)} disabled={!canManage} className="p-3 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-300 hover:bg-red-500/20 transition-all disabled:opacity-30" title="Supprimer"><Trash2 size={20} /></button>
               </div>
             </div>
           </div>
         </div>
 
         {item.matched_torrent_name && (
-          <div className="glass-card p-6 border-blue-500/10 bg-blue-500/5 animate-premium-fade">
-            <h3 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] mb-3">Cible Identifiée</h3>
-            <div className="text-white font-bold text-lg mb-4">{item.matched_torrent_name}</div>
-            <div className="flex flex-wrap gap-6">
-              <div className="flex flex-col"><span className="text-[9px] font-black text-gray-600 uppercase tracking-widest">Taille</span><span className="text-gray-300 font-bold">{formatSize(item.matched_torrent_size || 0)}</span></div>
-              <div className="flex flex-col"><span className="text-[9px] font-black text-gray-600 uppercase tracking-widest">Sources</span><span className="text-green-400 font-bold">{item.matched_torrent_seeds || 0} SEEDS</span></div>
+          <div className="p-6 rounded-[2rem] border border-transparent bg-white/[0.03] shadow-[0_16px_64px_rgba(37,99,235,0.12)] backdrop-blur-xl animate-premium-fade space-y-4 max-w-3xl mx-auto text-center">
+            <div className="flex items-center justify-center gap-3">
+              <span className="px-2.5 py-1 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[10px] font-black uppercase tracking-widest">
+                Fichier trouvé
+              </span>
+            </div>
+            <div className="text-white font-bold text-base md:text-lg break-all leading-snug">
+              {item.matched_torrent_name}
+            </div>
+            <div className="flex flex-col items-center gap-0.5">
+              <span className="text-[9px] font-black text-blue-400/60 uppercase tracking-widest">Taille</span>
+              <span className="text-blue-100/90 font-bold text-sm">{formatSize(item.matched_torrent_size || 0)}</span>
             </div>
           </div>
         )}
