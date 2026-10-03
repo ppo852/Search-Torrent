@@ -1,6 +1,7 @@
 import fetch from 'node-fetch';
 import { getSetting } from '../settings/index.js';
 import logger from '../core/logger.js';
+import { isBroadcastEpisodicGenres } from '../../../shared/tmdb-genres.js';
 
 /** Genre TMDB « Documentaire » (movies). */
 export const TMDB_DOCUMENTARY_GENRE_ID = 99;
@@ -81,6 +82,8 @@ class TmdbService {
           titles: Array.from(titles).filter(Boolean),
           genres,
           isDocumentary: genres.some((g) => g.id === TMDB_DOCUMENTARY_GENRE_ID),
+          /** Talk / Reality / News : ne pas filtrer les torrents sur l’année de 1ʳᵉ diffusion. */
+          isBroadcastEpisodic: isBroadcastEpisodicGenres(genres),
         };
       } catch (error) {
         logger.error(`[TMDB] Erreur lors de la récupération des détails pour ${type} ${tmdbId}:`, error);

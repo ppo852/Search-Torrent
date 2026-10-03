@@ -3,7 +3,24 @@ import assert from 'node:assert/strict';
 import {
   isRelevantResult,
   splitQueryTitleAndYear,
+  prepareQueries,
 } from '../../server/services/prowlarr/search.js';
+
+test('prepareQueries — avec année : année d’abord puis titre seul (pas seulement 2× année)', () => {
+  assert.deepEqual(prepareQueries('Villageois LVL 999', 'LV999の村人', '2026', null), [
+    'LV999の村人 2026',
+    'Villageois LVL 999 2026',
+    'LV999の村人',
+    'Villageois LVL 999',
+  ]);
+});
+
+test('prepareQueries — sans année : max 2 titres', () => {
+  assert.deepEqual(prepareQueries('Villageois LVL 999', 'LV999の村人', '', null), [
+    'LV999の村人',
+    'Villageois LVL 999',
+  ]);
+});
 
 test('isRelevantResult — titre numérique 1923 ne rejette pas sur année 2022', () => {
   assert.equal(

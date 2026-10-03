@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import { Link, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { showToast, showApiErrorToast } from '../stores/toastStore';
 import { hasTmdbAnimationGenre, TMDB_ANIMATION_GENRE_ID } from '../lib/tmdb-category-filter';
+import { getTmdbGenreLabel } from '../lib/tmdb-genre-labels';
 import { ArrowLeft, Calendar, Star, Tv, Film, BookmarkPlus, X, Play, Search, ChevronDown, SlidersHorizontal } from 'lucide-react';
 import type { MediaBrowseReturnState } from '../lib/media-browse';
 import { tmdbAPI } from '../services/tmdb/tmdb';
@@ -574,7 +575,7 @@ export function MediaDetailPage() {
                     key={genre.id}
                     className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border border-white/10 bg-white/5 text-gray-300"
                   >
-                    {genre.name}
+                    {getTmdbGenreLabel(genre)}
                   </span>
                 ))}
               </div>

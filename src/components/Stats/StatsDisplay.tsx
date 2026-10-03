@@ -39,7 +39,7 @@ export function StatsDisplay({ stats }: StatsDisplayProps) {
     },
     {
       key: 'ul',
-      label: 'Total UL',
+      label: 'Total envoyé',
       icon: <Share2 size={12} />,
       iconWrap: 'bg-green-500/10 rounded-xl text-green-400',
       value: formatSize(stats.totalUploaded),

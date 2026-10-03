@@ -184,7 +184,7 @@ export const QBittorrentPage: React.FC = () => {
             <h1 className="text-base lg:text-xl font-black text-white tracking-tighter uppercase mb-1">
               Contrôle <span className="text-blue-500">Téléchargements</span>
             </h1>
-            <p className="text-blue-400/60 font-medium italic text-[10px] lg:text-sm">Gestion des flux et téléchargements en temps réel</p>
+            <p className="text-blue-400/60 font-medium italic text-[10px] lg:text-sm">Gestion des téléchargements en temps réel</p>
           </div>
           
           <div className="flex items-center gap-3 w-full lg:w-auto">
@@ -193,7 +193,7 @@ export const QBittorrentPage: React.FC = () => {
               className="w-full lg:w-auto px-4 lg:px-6 py-2.5 lg:py-3 premium-gradient text-white font-black text-[10px] lg:text-xs uppercase tracking-widest rounded-xl shadow-lg shadow-blue-600/20 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2"
             >
               <ArrowDown size={16} className="lg:w-[18px] lg:h-[18px]" />
-              Ajouter un flux
+              Ajouter un torrent
             </button>
           </div>
         </div>

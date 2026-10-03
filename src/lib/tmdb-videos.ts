@@ -29,13 +29,24 @@ function byPublishedAtDesc(a: TmdbVideo, b: TmdbVideo): number {
   return bTime - aTime;
 }
 
+/** Vidéo clairement française (langue, région ou libellé). */
+export function isFrenchTrailer(video: TmdbVideo): boolean {
+  const lang = video.iso_639_1?.toLowerCase();
+  const region = video.iso_3166_1?.toUpperCase();
+  const name = String(video.name || '').toLowerCase();
+  if (lang === 'fr' || region === 'FR') return true;
+  if (name.includes('bande-annonce') || name.includes('bande annonce')) return true;
+  if (name.includes('officiel') && !/\bofficial\b/i.test(name)) return true;
+  return false;
+}
+
 /** Aligné TMDB FR : FR / officiel d'abord, pas seulement en. */
 function localeFitScore(video: TmdbVideo): number {
   const name = String(video.name || '').toLowerCase();
   const region = video.iso_3166_1?.toUpperCase();
   const lang = video.iso_639_1?.toLowerCase();
 
-  if (region === 'FR' || lang === 'fr' || name.includes('officiel')) return 0;
+  if (region === 'FR' || lang === 'fr' || name.includes('officiel') || name.includes('bande-annonce') || name.includes('bande annonce')) return 0;
   if (lang === 'en' || /\bofficial trailer\b/.test(name)) return 1;
   return 2;
 }
@@ -74,15 +85,14 @@ function getTrailerCandidates(videos: TmdbVideo[]): TmdbVideo[] {
 }
 
 /**
- * Sélection proche TMDB (locale FR) : trailer série principal, pas saison récente geo-bloquée.
+ * Sélection proche TMDB (locale FR) : si une BA FR existe, on ignore EN/autres.
  */
 export function pickBestTrailer(videos: TmdbVideo[]): TmdbVideo | null {
-  return pickBestFrom(getTrailerCandidates(videos));
-}
+  const candidates = getTrailerCandidates(videos);
+  if (!candidates.length) return null;
 
-/** Gate fetch FR : au moins une vidéo YouTube/Vimeo de type Trailer ou Teaser. */
-export function hasPlayableTrailer(videos: TmdbVideo[]): boolean {
-  return getTrailerCandidates(videos).length > 0;
+  const french = candidates.filter(isFrenchTrailer);
+  return pickBestFrom(french.length ? french : candidates);
 }
 
 export function getVideoEmbedUrl(video: TmdbVideo): string | null {

@@ -15,7 +15,7 @@ export function RequestStatusLegend({ className = '' }: { className?: string }) 
     <div className={className}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] text-gray-500">
         <span className="font-black uppercase tracking-widest text-gray-600 shrink-0">
-          Légende
+          Légende badges
         </span>
         {REQUEST_STATUS_LEGEND.map(({ status, mediaType, hint }) => {
           const badge = getRequestStatusBadge(status, mediaType);

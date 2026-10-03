@@ -68,6 +68,14 @@ export const WHATS_NEW: Record<string, string[]> = {
     'Corrections et petits réglages de stabilité.',
     'Si tu détectes un bug, merci de le signaler à un administrateur.',
   ],
+  '1.7.9': [
+    'Recherche sources plus complète : si peu de résultats avec l’année, une 2ᵉ passe sans année complète la liste (ex. animes).',
+    'Émissions / talk-shows (ex. Un dimanche à la campagne) : la date d’épisode dans le nom du torrent ne bloque plus les résultats.',
+    'Genres affichés en français (Talk → Émission, etc.).',
+    'Bande-annonce : priorité à la version française quand elle existe.',
+    'Petits textes d’interface corrigés (légendes, totaux téléchargements).',
+    'Si tu détectes un bug, merci de le signaler à un administrateur.',
+  ],
 };
 
 /** Versions dans l’ordre chronologique (plus ancienne → plus récente). */

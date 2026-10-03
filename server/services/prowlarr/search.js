@@ -91,13 +91,18 @@ export function getProwlarrCategoryId(mediaType) {
  * Variantes de titre TMDB pour le filtre de pertinence.
  */
 async function fetchVariants(tmdbId, type) {
-  if (!tmdbId) return { variants: [], originalTitle: null, isDocumentary: false };
+  if (!tmdbId) {
+    return { variants: [], originalTitle: null, isDocumentary: false, isBroadcastEpisodic: false };
+  }
   const info = await tmdbService.getDetailedInfo(tmdbId, type);
-  if (!info) return { variants: [], originalTitle: null, isDocumentary: false };
+  if (!info) {
+    return { variants: [], originalTitle: null, isDocumentary: false, isBroadcastEpisodic: false };
+  }
   return {
     variants: info.titles || [],
     originalTitle: info.originalTitle || info.mainTitle,
     isDocumentary: !!info.isDocumentary,
+    isBroadcastEpisodic: !!info.isBroadcastEpisodic,
   };
 }
 
@@ -197,17 +202,19 @@ export function isRelevantResult(torrentName, requestedTitles, year, seasonNumbe
 }
 
 /**
- * Variantes texte (max 2) : original d'abord, puis titre local.
+ * Variantes texte : original d'abord, puis titre local.
  * Priorité : saison → année → titre seul.
+ * S’il y a année ou saison : jusqu’à 2 requêtes « qualifiées », puis jusqu’à 2 titres seuls
+ * (sinon le plafond de 2 mangeait les deux slots en « titre+année » et le sans-année ne partait jamais).
+ * Sans année/saison : max 2 titres seuls.
  */
-function prepareQueries(baseTitle, originalTitle, year, seasonNumber) {
-  const ordered = [];
+export function prepareQueries(baseTitle, originalTitle, year, seasonNumber) {
   const seen = new Set();
-  const push = (query) => {
+  const pushInto = (list, query) => {
     const q = String(query || '').trim();
     if (!q || seen.has(q)) return;
     seen.add(q);
-    ordered.push(q);
+    list.push(q);
   };
 
   const st = baseTitle ? simplifyTitle(baseTitle) : '';
@@ -215,18 +222,28 @@ function prepareQueries(baseTitle, originalTitle, year, seasonNumber) {
     originalTitle && originalTitle !== baseTitle ? simplifyTitle(originalTitle) : '';
   const titles = [ost, st].filter(Boolean);
   const sToken = seasonNumber ? `S${pad2(seasonNumber)}` : null;
+  const hasQualifier = Boolean(sToken || year);
 
-  for (const t of titles) {
-    if (sToken) push(`${t} ${sToken}`);
-  }
-  for (const t of titles) {
-    if (year) push(`${t} ${year}`);
-  }
-  for (const t of titles) {
-    push(t);
+  if (!hasQualifier) {
+    const bare = [];
+    for (const t of titles) pushInto(bare, t);
+    return bare.slice(0, 2);
   }
 
-  return ordered.slice(0, 2);
+  const qualified = [];
+  const bare = [];
+  for (const t of titles) {
+    if (sToken) pushInto(qualified, `${t} ${sToken}`);
+  }
+  for (const t of titles) {
+    if (year) pushInto(qualified, `${t} ${year}`);
+  }
+  for (const t of titles) {
+    pushInto(bare, t);
+  }
+
+  // 2 avec saison/année, puis 2 sans — le seuil TEXT_SEARCH_ENOUGH_RESULTS coupe tôt si déjà riche.
+  return [...qualified.slice(0, 2), ...bare.slice(0, 2)];
 }
 
 /**
@@ -442,9 +459,14 @@ async function runTextQueries(queries, categoryId) {
   return out;
 }
 
+/** Sous ce seuil après une requête texte, on enchaîne la suivante (liste prepareQueries, jusqu’à 4). */
+const TEXT_SEARCH_ENOUGH_RESULTS = 15;
+
 /**
- * ID d'abord ; texte séquentiel si besoin (arrêt dès résultats filtrés).
- * expandTextSearch : ID + toutes les variantes texte (max 2), sans arrêt anticipé.
+ * ID d'abord (accumulé), puis texte séquentiel si besoin.
+ * Arrêt si ≥ TEXT_SEARCH_ENOUGH_RESULTS sur le total filtré (ID et/ou texte).
+ * Texte : prepareQueries jusqu’à 2 qualifiées + 2 titres seuls.
+ * expandTextSearch : ID + toutes les variantes texte, sans arrêt anticipé.
  */
 async function processWithIdTitleFallback({
   idRaw,
@@ -464,20 +486,21 @@ async function processWithIdTitleFallback({
     return processSearchResults(raw, processOptions);
   }
 
-  let processed = processSearchResults(applyPre(idRaw), processOptions);
-  if (processed.results.length > 0) {
+  // Accumule ID + texte ; stop dès ≥ TEXT_SEARCH_ENOUGH_RESULTS (ID seul ne coupe plus à 1).
+  let textAccum = [...(idRaw || [])];
+  let processed = processSearchResults(applyPre(textAccum), processOptions);
+  if (processed.results.length >= TEXT_SEARCH_ENOUGH_RESULTS) {
     return processed;
   }
 
   const queries = (textQueries || []).filter(Boolean);
-  let textAccum = [];
   for (const q of queries) {
     const batch = await runProwlarrSearch(q, categoryId, 'search');
     textAccum.push(...(batch || []));
     processed = processSearchResults(applyPre(textAccum), processOptions);
-    if (processed.results.length > 0) {
+    if (processed.results.length >= TEXT_SEARCH_ENOUGH_RESULTS) {
       if ((idRaw || []).length > 0) {
-        logger.debug('prowlarr', 'ID sans résultat pertinent après filtre, fallback texte');
+        logger.debug('prowlarr', 'ID insuffisant après filtre, complément texte');
       }
       return processed;
     }
@@ -552,8 +575,10 @@ export async function searchTvSeries({
   episodeCount = 1,
   expandTextSearch = false,
 }) {
-  const { variants, originalTitle } = await fetchVariants(tmdbId, 'tv');
+  const { variants, originalTitle, isBroadcastEpisodic } = await fetchVariants(tmdbId, 'tv');
   const finalVariants = variants.length > 0 ? variants : [title];
+  // Émissions (Talk/Reality/News) : date d’épisode dans le release ≠ année de 1ʳᵉ diffusion.
+  const effectiveYear = isBroadcastEpisodic ? '' : year;
 
   const idRaw = await runIndexerIdSearch({
     kind: 'tv',
@@ -562,7 +587,7 @@ export async function searchTvSeries({
     mediaType,
   });
 
-  const queries = prepareQueries(title, originalTitle || title, year, seasonNumber);
+  const queries = prepareQueries(title, originalTitle || title, effectiveYear, seasonNumber);
   const { results } = await processWithIdTitleFallback({
     idRaw,
     textQueries: queries,
@@ -571,7 +596,7 @@ export async function searchTvSeries({
     processOptions: {
       baseTitle: title,
       validTitles: finalVariants,
-      year,
+      year: effectiveYear,
       minSeeds,
       qualityProfile,
       multiplier: episodeCount,
@@ -605,7 +630,7 @@ export async function searchTvEpisode({
     mediaType,
   });
 
-  // Max 2 variantes texte (original puis FR), séquentiel + stop via processWithIdTitleFallback.
+  // Épisode : original puis FR + SxxExx (pas prepareQueries — pas d’année ici).
   const textQueries = [];
   const ost = originalTitle ? simplifyTitle(originalTitle) : '';
   const st = title ? simplifyTitle(title) : '';
@@ -613,7 +638,7 @@ export async function searchTvEpisode({
   if (st && st !== ost) textQueries.push(`${st} ${episodeToken}`);
   if (textQueries.length === 0 && title) textQueries.push(`${title} ${episodeToken}`);
 
-  // Auto-search : jamais d'expand (évite homonymes). ID → texte si besoin + filtre titre.
+  // Auto-search : jamais d'expand. ID → texte ; seuil 15 sur la boucle texte.
   const { results } = await processWithIdTitleFallback({
     idRaw,
     textQueries: textQueries.slice(0, 2),
