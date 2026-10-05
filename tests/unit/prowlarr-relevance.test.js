@@ -15,6 +15,26 @@ test('prepareQueries — avec année : année d’abord puis titre seul (pas seu
   ]);
 });
 
+test('isRelevantResult — Street Fighter 2026 ≠ Street Fighter II The Movie', () => {
+  const name =
+    'Street.Fighter.II.The.Movie.MULTi.1080p.BluRay.x264-KAZETV.FRENCH';
+  assert.equal(isRelevantResult(name, ['Street Fighter'], '2026', null), false);
+  assert.equal(
+    isRelevantResult(
+      'Street.Fighter.2026.MULTi.1080p.WEB.x264',
+      ['Street Fighter'],
+      '2026',
+      null
+    ),
+    true
+  );
+  // Si on demande explicitement la suite, OK
+  assert.equal(
+    isRelevantResult(name, ['Street Fighter II'], '1994', null),
+    true
+  );
+});
+
 test('prepareQueries — sans année : max 2 titres', () => {
   assert.deepEqual(prepareQueries('Villageois LVL 999', 'LV999の村人', '', null), [
     'LV999の村人',

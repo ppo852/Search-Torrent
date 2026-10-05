@@ -109,6 +109,28 @@ async function fetchVariants(tmdbId, type) {
 /**
  * Correspondance stricte titre demandé ↔ nom de torrent.
  */
+function isSequelSuffixToken(word) {
+  const w = String(word || '').toLowerCase();
+  if (!w) return false;
+  // 2–20 (pas une année à 4 chiffres)
+  if (/^([2-9]|1[0-9]|20)$/.test(w)) return true;
+  if (/^(ii|iii|iv|v|vi|vii|viii|ix|x|xi|xii|xiii|xiv|xv)$/.test(w)) return true;
+  if (/^(part|partie|episode|ep)$/.test(w)) return true;
+  return false;
+}
+
+/** Index du 1er enchaînement exact des mots du titre dans le nom normalisé découpé. */
+function findTitleWordSequenceIndex(nameWords, titleWords) {
+  if (!titleWords.length || nameWords.length < titleWords.length) return -1;
+  outer: for (let i = 0; i <= nameWords.length - titleWords.length; i += 1) {
+    for (let j = 0; j < titleWords.length; j += 1) {
+      if (nameWords[i + j] !== titleWords[j]) continue outer;
+    }
+    return i;
+  }
+  return -1;
+}
+
 function checkSingleTitleStrict(n, requestedTitle) {
   const t = normalize(requestedTitle).replace(/\s+/g, ' ');
   if (!t) return false;
@@ -127,6 +149,16 @@ function checkSingleTitleStrict(n, requestedTitle) {
       const nextWord = nWordsRaw[indexInName + 1];
       const mediaTokenRegex = /^(s\d+(e\d+)?|e\d+|\d{4}|1080p|720p|2160p|4k|uhd|vostfr|vost|french|multi|vf|bluray|web-dl|webrip|hdrip|h264|x264|h265|x265|hevc)$/i;
       if (!mediaTokenRegex.test(nextWord)) return false;
+    }
+  } else {
+    // Street Fighter ≠ Street Fighter II / Part 2 (sauf si le titre demandé finit déjà par ce numéro)
+    const titleIdx = findTitleWordSequenceIndex(nWordsRaw, tWordsRaw);
+    if (titleIdx !== -1 && titleIdx + tWordsRaw.length < nWordsRaw.length) {
+      const nextWord = nWordsRaw[titleIdx + tWordsRaw.length];
+      const requestedAlreadySequel = isSequelSuffixToken(tWordsRaw[tWordsRaw.length - 1]);
+      if (!requestedAlreadySequel && isSequelSuffixToken(nextWord)) {
+        return false;
+      }
     }
   }
 

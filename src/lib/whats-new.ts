@@ -76,6 +76,10 @@ export const WHATS_NEW: Record<string, string[]> = {
     'Petits textes d’interface corrigés (légendes, totaux téléchargements).',
     'Si tu détectes un bug, merci de le signaler à un administrateur.',
   ],
+  '1.7.10': [
+    'Auto-téléchargement : ne plus confondre un film avec sa suite (ex. Street Fighter ≠ Street Fighter II).',
+    'Si tu détectes un bug, merci de le signaler à un administrateur.',
+  ],
 };
 
 /** Versions dans l’ordre chronologique (plus ancienne → plus récente). */
