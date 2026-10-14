@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Clock, Search, Tag, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Calendar, Clock, Search, Star, Tag, Trash2, Tv, X } from 'lucide-react';
 import { api } from '../services/api';
 import { TvSeasonRequest, TvSeasonPresence } from '../types';
 import ManualSearchModal from '../components/ManualSearchModal';
@@ -11,6 +11,11 @@ import { useAuthStore } from '../stores/authStore';
 import { tmdbAPI } from '../services/tmdb/tmdb';
 import { ExpandableText } from '../components/ui/ExpandableText';
 import { getRequestStatusBadge } from '../lib/request-status-labels';
+import { getRequestMediaKindLabel, getTmdbGenreLabel } from '../lib/tmdb-genre-labels';
+import { TMDB_ANIMATION_GENRE_ID } from '../lib/tmdb-category-filter';
+import { formatTmdbYear, type TmdbGenreRef } from '../lib/tmdb-meta';
+import type { TmdbOriginPlatform } from '../lib/tmdb-origin-platforms';
+import { OriginPlatformLogos } from '../components/ui/OriginPlatformLogos';
 import {
   EPISODE_FAILED_LABEL,
   EPISODE_RETRY_HINT,
@@ -78,6 +83,10 @@ export function TvShowRequestPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [backdropPath, setBackdropPath] = useState<string | null>(null);
   const [overview, setOverview] = useState<string | null>(null);
+  const [tmdbGenres, setTmdbGenres] = useState<TmdbGenreRef[]>([]);
+  const [tmdbFirstAirDate, setTmdbFirstAirDate] = useState<string | null>(null);
+  const [tmdbVoteAverage, setTmdbVoteAverage] = useState<number>(0);
+  const [originPlatforms, setOriginPlatforms] = useState<TmdbOriginPlatform[]>([]);
 
   const [expandedSeasonIds, setExpandedSeasonIds] = useState<Set<string>>(new Set());
   const [episodesBySeasonId, setEpisodesBySeasonId] = useState<Record<string, TvDetailEpisode[]>>({});
@@ -116,7 +125,16 @@ export function TvShowRequestPage() {
           const data = await tmdbAPI.getTvDetails(String(parsedTmdbId));
           if (data.backdrop_path) setBackdropPath(`https://image.tmdb.org/t/p/original${data.backdrop_path}`);
           setOverview(data.overview);
-        } catch (e) { }
+          setTmdbGenres(Array.isArray(data?.genres) ? data.genres : []);
+          setTmdbFirstAirDate(data?.first_air_date || null);
+          setTmdbVoteAverage(Number(data?.vote_average) || 0);
+          setOriginPlatforms(Array.isArray(data?.originPlatforms) ? data.originPlatforms : []);
+        } catch (e) {
+          setTmdbGenres([]);
+          setTmdbFirstAirDate(null);
+          setTmdbVoteAverage(0);
+          setOriginPlatforms([]);
+        }
         await Promise.all(
           filtered.map(async (s: TvSeasonRequest) => {
             await loadSeasonEpisodes(s);
@@ -337,7 +355,15 @@ export function TvShowRequestPage() {
   const posterUrl = seasons[0]?.poster_url || null;
   const hasLimitedActions = seasons.some(s => !canManageSeason(s));
   const isAnimeShow = mediaType === 'anime' || seasons.some((s) => s.media_type === 'anime');
-  const mediaTypeLabel = isAnimeShow ? 'Anime' : 'Série TV';
+  const isBroadcastShow = seasons.some((s) => Boolean(s.is_broadcast_episodic));
+  const mediaTypeLabel = getRequestMediaKindLabel(
+    isAnimeShow ? 'anime' : 'tv',
+    isBroadcastShow
+  );
+  const displayGenres = tmdbGenres.filter(
+    (g) => !(isAnimeShow && g.id === TMDB_ANIMATION_GENRE_ID)
+  );
+  const yearLabel = formatTmdbYear(tmdbFirstAirDate);
 
   if (isLoading) return (
     <div className="flex flex-col items-center justify-center py-32">
@@ -347,68 +373,98 @@ export function TvShowRequestPage() {
   );
 
   return (
-    <div className="animate-premium-fade relative min-h-screen pb-20">
-      {backdropPath && (
-        <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
-          <img
-            src={backdropPath}
-            alt=""
-            className="absolute inset-0 w-full h-full object-cover opacity-[0.28] scale-[1.02]"
-          />
-          <div className="absolute inset-0 bg-gray-950/50 backdrop-blur-[1px]" />
-          <div className="absolute inset-0 bg-gradient-to-b from-gray-950/75 via-transparent to-gray-950" />
-          <div className="absolute inset-0 bg-gradient-to-r from-gray-950/65 via-transparent to-gray-950/65" />
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                'radial-gradient(ellipse 85% 75% at 50% 40%, transparent 45%, rgba(3,7,18,0.3) 100%)',
-            }}
-          />
-        </div>
-      )}
+    <div className="animate-premium-fade relative min-h-screen pb-20 bg-gray-950">
+      {/* Fond TMDB limité au hero — ne passe pas sous les saisons */}
+      <div className="relative overflow-hidden">
+        {backdropPath && (
+          <div className="absolute inset-0 z-0 pointer-events-none">
+            <img
+              src={backdropPath}
+              alt=""
+              className="absolute inset-0 w-full h-full object-cover opacity-[0.42] scale-[1.02]"
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-gray-950/55 via-gray-950/25 to-gray-950/55" />
+            <div className="absolute inset-0 bg-gradient-to-b from-gray-950/35 via-gray-950/50 to-gray-950" />
+          </div>
+        )}
 
-      <div className="relative z-10 space-y-8">
-        <div className="flex items-center justify-between">
-          <button onClick={() => navigate('/library')} className="flex items-center gap-2 text-blue-400/70 hover:text-blue-200 group transition-all">
-            <div className="p-2 rounded-2xl bg-blue-600/10 border border-blue-500/20 group-hover:bg-blue-600/20 transition-colors"><ArrowLeft size={18} /></div>
-            <span className="font-bold tracking-tight">Demandes</span>
-          </button>
-          <button onClick={load} className="px-6 py-2 rounded-2xl bg-blue-600/10 border border-blue-500/25 text-blue-300 font-bold hover:bg-blue-600/20 transition-all uppercase text-[10px] tracking-widest">Rafraîchir</button>
-        </div>
+        <div className="relative z-10 space-y-8 pb-10">
+          <div className="flex items-center justify-between">
+            <button onClick={() => navigate('/library')} className="flex items-center gap-2 text-blue-400/70 hover:text-blue-200 group transition-all">
+              <div className="p-2 rounded-2xl bg-blue-600/10 border border-blue-500/20 group-hover:bg-blue-600/20 transition-colors"><ArrowLeft size={18} /></div>
+              <span className="font-bold tracking-tight">Demandes</span>
+            </button>
+            <button onClick={load} className="px-6 py-2 rounded-2xl bg-blue-600/10 border border-blue-500/25 text-blue-300 font-bold hover:bg-blue-600/20 transition-all uppercase text-[10px] tracking-widest">Rafraîchir</button>
+          </div>
 
-        <div className="p-8 rounded-[2rem] border border-transparent bg-white/[0.03] shadow-[0_16px_64px_rgba(37,99,235,0.12)] backdrop-blur-xl">
-          <div className="flex flex-col md:flex-row gap-10">
-            <div className="w-32 md:w-48 lg:w-64 flex-shrink-0 mx-auto md:mx-0">
-              <div className="overflow-hidden rounded-[1.75rem] shadow-[0_12px_40px_rgba(0,0,0,0.45)] rotate-1 ring-1 ring-blue-500/15">
-                {posterUrl ? <img src={posterUrl} alt={title} className="w-full h-auto object-cover" /> : <div className="aspect-[2/3] flex items-center justify-center bg-gray-900 text-gray-600 font-black uppercase text-xs">No Poster</div>}
+          <div className="p-8 rounded-[2rem] border border-white/5 bg-gray-950/55 shadow-[0_16px_64px_rgba(37,99,235,0.12)] backdrop-blur-md">
+            <div className="flex flex-col md:flex-row gap-10">
+              <div className="w-32 md:w-48 lg:w-64 flex-shrink-0 mx-auto md:mx-0">
+                <div className="overflow-hidden rounded-[1.75rem] shadow-[0_12px_40px_rgba(0,0,0,0.45)] rotate-1 ring-1 ring-blue-500/15">
+                  {posterUrl ? <img src={posterUrl} alt={title} className="w-full h-auto object-cover" /> : <div className="aspect-[2/3] flex items-center justify-center bg-gray-900 text-gray-600 font-black uppercase text-xs">No Poster</div>}
+                </div>
               </div>
-            </div>
-            <div className="flex-1 space-y-6">
-              <div>
-                <h1 className="text-2xl lg:text-3xl font-black text-white tracking-tighter uppercase mb-4">{title}</h1>
-                <div className="flex items-center gap-3">
-                  <div className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest border ${isAnimeShow ? 'bg-pink-500/10 border-pink-500/20 text-pink-400' : 'bg-blue-500/10 border-blue-500/20 text-blue-400'}`}>
-                    {mediaTypeLabel}
+              <div className="flex-1 space-y-6">
+                <div>
+                  <div className="flex flex-wrap items-center gap-4 mb-4">
+                    <div className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${isAnimeShow ? 'bg-pink-500/10 border-pink-500/20 text-pink-400' : 'bg-purple-600/20 border-purple-500/50 text-purple-400'}`}>
+                      {mediaTypeLabel}
+                    </div>
+                    {tmdbVoteAverage > 0 && (
+                      <div className="flex items-center gap-1.5 text-yellow-500 font-black">
+                        <Star size={16} fill="currentColor" />
+                        <span>{tmdbVoteAverage.toFixed(1)}</span>
+                      </div>
+                    )}
                   </div>
-                  <div className="text-blue-400/70 text-xs font-bold uppercase tracking-widest">{seasons.length} Saison{seasons.length > 1 ? 's' : ''}</div>
+                  <h1 className="text-2xl md:text-3xl font-black text-white tracking-tighter mb-4 leading-none uppercase">
+                    {title}
+                  </h1>
+                  {displayGenres.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-6">
+                      {displayGenres.map((genre) => (
+                        <span
+                          key={genre.id ?? genre.name}
+                          className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border border-white/10 bg-white/5 text-gray-300"
+                        >
+                          {getTmdbGenreLabel(genre)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-6 mb-2 text-gray-400 font-bold uppercase text-xs tracking-widest">
+                    {yearLabel && (
+                      <div className="flex items-center gap-2">
+                        <Calendar size={14} className="text-blue-500" />
+                        <span>{yearLabel}</span>
+                      </div>
+                    )}
+                    {seasons.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <Tv size={14} className="text-purple-500" />
+                        <span>{seasons.length} Saison{seasons.length > 1 ? 's' : ''}</span>
+                      </div>
+                    )}
+                    <OriginPlatformLogos platforms={originPlatforms} />
+                  </div>
                 </div>
-              </div>
-              <div className="space-y-2">
-                <h3 className="text-[10px] font-black text-blue-400/70 uppercase tracking-widest">Synopsis</h3>
-                <ExpandableText text={overview || "Aucune description."} maxLines={3} className="max-w-3xl" />
-              </div>
-              {hasLimitedActions && (
-                <div className="p-4 bg-blue-600/10 border border-blue-600/20 rounded-2xl flex items-center gap-3">
-                  <div className="p-2 bg-blue-600/20 rounded-xl text-blue-400"><Tag size={16} /></div>
-                  <p className="text-[10px] font-black text-blue-400/80 uppercase tracking-widest">Mode consultation actif</p>
+                <div className="space-y-2">
+                  <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Synopsis</h3>
+                  <ExpandableText text={overview || "Aucune description."} maxLines={3} className="max-w-3xl" />
                 </div>
-              )}
+                {hasLimitedActions && (
+                  <div className="p-4 bg-blue-600/10 border border-blue-600/20 rounded-2xl flex items-center gap-3">
+                    <div className="p-2 bg-blue-600/20 rounded-xl text-blue-400"><Tag size={16} /></div>
+                    <p className="text-[10px] font-black text-blue-400/80 uppercase tracking-widest">Mode consultation actif</p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
+      </div>
 
-        <div className="space-y-4">
+      <div className="relative z-10 space-y-4 bg-gray-950 pt-2">
           <div className="ml-1">
             <h2 className="text-lg md:text-xl font-bold text-white">Saisons suivies</h2>
               <p className="text-xs text-blue-400/70 mt-0.5">
@@ -418,7 +474,7 @@ export function TvShowRequestPage() {
             </p>
           </div>
           {sortedSeasons.map((s) => (
-            <div key={s.id} className={`glass-card transition-all rounded-3xl border-blue-500/10 bg-white/[0.02] shadow-[0_12px_48px_rgba(37,99,235,0.08)] overflow-hidden ${expandedSeasonIds.has(s.id) ? 'ring-1 ring-blue-500/25' : ''}`}>
+            <div key={s.id} className={`glass-card transition-all rounded-3xl border border-blue-500/15 bg-gray-900/95 shadow-[0_12px_48px_rgba(37,99,235,0.08)] overflow-hidden ${expandedSeasonIds.has(s.id) ? 'ring-1 ring-blue-500/25' : ''}`}>
               <div className="p-5 md:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-6">
                 <div className="flex-1 cursor-pointer" onClick={() => toggleSeason(s)}>
                   <div className="flex flex-wrap items-center gap-3 mb-2">
@@ -525,7 +581,6 @@ export function TvShowRequestPage() {
               )}
             </div>
           ))}
-        </div>
       </div>
 
       <ManualSearchModal

@@ -80,6 +80,13 @@ export const WHATS_NEW: Record<string, string[]> = {
     'Auto-téléchargement : ne plus confondre un film avec sa suite (ex. Street Fighter ≠ Street Fighter II).',
     'Si tu détectes un bug, merci de le signaler à un administrateur.',
   ],
+  '1.7.11': [
+    'Sur la fiche d’un film : un bouton pour télécharger directement le meilleur fichier trouvé.',
+    'Sur une série : tu peux télécharger toute une saison d’un coup (pack), saison par saison.',
+    'Si c’est déjà sur Emby ou déjà demandé, les boutons sont grisés pour éviter les doublons.',
+    'La fiche affiche mieux les infos (genres, logos des créateurs / chaînes, présentation).',
+    'Si tu détectes un bug, merci de le signaler à un administrateur.',
+  ],
 };
 
 /** Versions dans l’ordre chronologique (plus ancienne → plus récente). */

@@ -84,6 +84,19 @@ export function isBroadcastEpisodicGenres(genres) {
   return genres.some((g) => TMDB_BROADCAST_EPISODIC_GENRE_IDS.has(Number(g?.id)));
 }
 
+/**
+ * Libellé d’affichage demandes / fiche (pas une catégorie Prowlarr).
+ * Talk / Reality / News → « Émission », sinon Série / Anime / Film…
+ */
+export function getRequestMediaKindLabel(mediaType, isBroadcastEpisodic = false) {
+  if (mediaType === 'movie') return 'Film';
+  if (mediaType === 'animation') return 'Animation';
+  if (mediaType === 'anime') return 'Anime';
+  if (isBroadcastEpisodic) return 'Émission';
+  if (mediaType === 'tv') return 'Série';
+  return 'Série';
+}
+
 export function getTmdbGenreLabel(genre) {
   if (!genre) return '';
   const byId = TMDB_GENRE_LABELS_FR[Number(genre.id)];

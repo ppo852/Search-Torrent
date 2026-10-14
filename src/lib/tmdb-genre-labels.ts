@@ -1,6 +1,7 @@
 export {
   getTmdbGenreLabel,
   isBroadcastEpisodicGenres,
+  getRequestMediaKindLabel,
   TMDB_TV_TALK_GENRE_ID,
   TMDB_TV_REALITY_GENRE_ID,
   TMDB_TV_NEWS_GENRE_ID,

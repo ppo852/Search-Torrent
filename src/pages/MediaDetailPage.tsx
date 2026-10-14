@@ -1,10 +1,14 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { api } from '../services/api';
 import { Link, useParams, useNavigate, useLocation } from 'react-router-dom';
-import { showToast, showApiErrorToast } from '../stores/toastStore';
+import { showToast, showApiErrorToast, showErrorToast, showInfoToast } from '../stores/toastStore';
 import { hasTmdbAnimationGenre, TMDB_ANIMATION_GENRE_ID } from '../lib/tmdb-category-filter';
-import { getTmdbGenreLabel } from '../lib/tmdb-genre-labels';
-import { ArrowLeft, Calendar, Star, Tv, Film, BookmarkPlus, X, Play, Search, ChevronDown, SlidersHorizontal } from 'lucide-react';
+import { getTmdbGenreLabel, isBroadcastEpisodicGenres, getRequestMediaKindLabel } from '../lib/tmdb-genre-labels';
+import { formatTmdbDateFr, formatTmdbYear } from '../lib/tmdb-meta';
+import type { TmdbOriginPlatform } from '../lib/tmdb-origin-platforms';
+import { OriginPlatformLogos } from '../components/ui/OriginPlatformLogos';
+import { TmdbFullscreenBackdrop } from '../components/ui/TmdbFullscreenBackdrop';
+import { ArrowLeft, Calendar, Star, Tv, Film, BookmarkPlus, X, Play, Search, ChevronDown, SlidersHorizontal, Download } from 'lucide-react';
 import type { MediaBrowseReturnState } from '../lib/media-browse';
 import { tmdbAPI } from '../services/tmdb/tmdb';
 import { ResultCard } from '../components/ui/ResultCard';
@@ -14,9 +18,12 @@ import type { SearchResult, SortOption, TmdbResult } from '../types';
 import { globalSettings } from '../services/settings';
 import { ExpandableText } from '../components/ui/ExpandableText';
 import { TrailerModal } from '../components/ui/TrailerModal';
+import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { pickBestTrailer, type TmdbVideo } from '../lib/tmdb-videos';
 import { useInteractiveTorrentDownload } from '../hooks/useInteractiveTorrentDownload';
 import { useRequestStatus } from '../hooks/useRequestStatus';
+import { useAuthStore } from '../stores/authStore';
+import { resolveForceDownloadPermission } from '../lib/force-download-permission';
 import { PosterBadgeStack } from '../components/ui/PosterBadgeStack';
 import { TvShowSeasonStatusPanel } from '../components/ui/TvShowSeasonStatusPanel';
 import type { TvSeasonStatusRow } from '../services/api/api';
@@ -101,16 +108,27 @@ export function MediaDetailPage() {
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [trailer, setTrailer] = useState<TmdbVideo | null>(null);
+  const [originPlatforms, setOriginPlatforms] = useState<TmdbOriginPlatform[]>([]);
   const [trailerModalOpen, setTrailerModalOpen] = useState(false);
   const [seasonStatusRows, setSeasonStatusRows] = useState<TvSeasonStatusRow[]>([]);
   const [mobileSourceFiltersOpen, setMobileSourceFiltersOpen] = useState(false);
+  const [quickDownloadLoading, setQuickDownloadLoading] = useState(false);
+  const [quickDownloadSeasonLoading, setQuickDownloadSeasonLoading] = useState<number | null>(null);
+  const [quickForcePending, setQuickForcePending] = useState<
+    | { kind: 'movie' }
+    | { kind: 'tv'; seasonNumber: number }
+    | null
+  >(null);
   const { getPosterBadgesForMedia } = useRequestStatus();
+  const userId = useAuthStore((s) => s.user?.id);
+  const canForce = useAuthStore((s) => !!s.user?.allow_force_interactive_download);
 
   useEffect(() => {
     const loadMediaDetails = async () => {
       if (!type || !id) return;
 
       setTrailer(null);
+      setOriginPlatforms([]);
       setTrailerModalOpen(false);
       setSearchExpanded(false);
 
@@ -165,6 +183,7 @@ export function MediaDetailPage() {
 
         const videoResults = Array.isArray(data?.videos?.results) ? data.videos.results : [];
         setTrailer(pickBestTrailer(videoResults));
+        setOriginPlatforms(Array.isArray(data?.originPlatforms) ? data.originPlatforms : []);
 
         if (actualType === 'tv' && Array.isArray(data.seasons)) {
           const seasons = data.seasons
@@ -281,6 +300,15 @@ export function MediaDetailPage() {
     [seasonStatusRows]
   );
 
+  const movieActionBadges = useMemo(() => {
+    if (!media || media.type !== 'movie') return [] as ReturnType<typeof getPosterBadgesForMedia>;
+    return getPosterBadgesForMedia(media);
+  }, [media, getPosterBadgesForMedia]);
+
+  const movieInLibrary = movieActionBadges.some((b) => b.type === 'in_library');
+  const movieAlreadyRequested = movieActionBadges.some((b) => b.type === 'requested');
+  const movieAutomateLocked = movieInLibrary || movieAlreadyRequested;
+
   const toggleSeasonNumber = (num: number) => {
     if (existingSeasonNumbers.includes(num) || completeSeasonNumbers.has(num)) return;
     setSelectedSeasonNumbers((prev) =>
@@ -320,6 +348,79 @@ export function MediaDetailPage() {
   };
 
   const { download, confirmModal } = useInteractiveTorrentDownload();
+
+  const runQuickDownload = async (
+    opts: { kind: 'movie' } | { kind: 'tv'; seasonNumber: number },
+    force = false
+  ) => {
+    if (!media) return;
+    const isSeason = opts.kind === 'tv';
+    if (!force) {
+      if (!isSeason && movieInLibrary) {
+        showInfoToast('Ce média est déjà dans Emby');
+        return;
+      }
+      if (isSeason && completeSeasonNumbers.has(opts.seasonNumber)) {
+        showInfoToast(`Saison ${opts.seasonNumber} déjà disponible sur Emby`);
+        return;
+      }
+    }
+    if (isSeason) setQuickDownloadSeasonLoading(opts.seasonNumber);
+    else setQuickDownloadLoading(true);
+
+    try {
+      const mediaType = isSeason
+        ? (isAnime ? 'anime' : 'tv')
+        : (isAnimationMovie ? 'animation' : 'movie');
+      const year = media.releaseDate?.split('-')[0] || '';
+
+      const res = await api.quickDownload({
+        kind: isSeason ? 'tv' : 'movie',
+        title: media.title,
+        year,
+        tmdbId: media.id,
+        mediaType,
+        seasonNumber: isSeason ? opts.seasonNumber : undefined,
+        force,
+      });
+
+      if (res.ok) {
+        showToast(
+          isSeason
+            ? `Saison ${opts.seasonNumber} envoyée : ${res.torrentName || 'torrent'}`
+            : `Envoi qBit : ${res.torrentName || 'torrent'}`
+        );
+        return;
+      }
+
+      if (res.reason === 'already_present') {
+        const canForceLive = await resolveForceDownloadPermission({ userId, canForce });
+        if (canForceLive && !force) {
+          setQuickForcePending(opts);
+          return;
+        }
+        showInfoToast(res.error || 'Ce média est déjà dans Emby');
+        return;
+      }
+
+      if (res.reason === 'no_pack') {
+        showInfoToast('Aucun pack saison trouvé — utilise la liste Sources');
+        return;
+      }
+
+      if (res.reason === 'no_results') {
+        showInfoToast('Aucun torrent trouvé — utilise la liste Sources');
+        return;
+      }
+
+      showErrorToast(res.error || 'Échec du téléchargement');
+    } catch (err) {
+      showApiErrorToast(err, 'Échec du téléchargement');
+    } finally {
+      setQuickDownloadLoading(false);
+      setQuickDownloadSeasonLoading(null);
+    }
+  };
 
   const handleDownload = async (result: SearchResult) => {
     let indexerTag: string | undefined;
@@ -361,6 +462,13 @@ export function MediaDetailPage() {
 
   const handleTrack = async () => {
     if (!media) return;
+
+    if (media.type === 'movie' && movieAutomateLocked) {
+      showInfoToast(
+        movieInLibrary ? 'Ce média est déjà dans Emby' : 'Ce média est déjà demandé'
+      );
+      return;
+    }
 
     // Si TMDB nous confirme que c'est une série, on ouvre le modal des saisons
     // Peu importe si l'URL dit 'tv', 'multi' ou autre chose.
@@ -493,26 +601,7 @@ export function MediaDetailPage() {
 
   return (
     <div className="animate-premium-fade relative min-h-screen">
-      {/* Background Cinématique */}
-      {media.backdropPath && (
-        <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-          <img
-            src={media.backdropPath}
-            alt=""
-            className="absolute inset-0 w-full h-full object-cover opacity-[0.28] scale-[1.02]"
-          />
-          <div className="absolute inset-0 bg-gray-950/50 backdrop-blur-[1px]" />
-          <div className="absolute inset-0 bg-gradient-to-b from-gray-950/75 via-transparent to-gray-950" />
-          <div className="absolute inset-0 bg-gradient-to-r from-gray-950/65 via-transparent to-gray-950/65" />
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                'radial-gradient(ellipse 85% 75% at 50% 40%, transparent 45%, rgba(3,7,18,0.3) 100%)',
-            }}
-          />
-        </div>
-      )}
+      <TmdbFullscreenBackdrop src={media.backdropPath} />
 
       <div className="relative z-10 space-y-8">
         {browseReturn && (
@@ -548,7 +637,10 @@ export function MediaDetailPage() {
               <div className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${media.type === 'movie' ? 'bg-blue-600/20 border-blue-500/50 text-blue-400' : 'bg-purple-600/20 border-purple-500/50 text-purple-400'}`}>
                 {media.type === 'movie'
                   ? (isAnimationMovie ? 'Animation' : 'Film')
-                  : isAnime ? 'Anime' : 'Série TV'}
+                  : getRequestMediaKindLabel(
+                      isAnime ? 'anime' : 'tv',
+                      isBroadcastEpisodicGenres(media.genres)
+                    )}
               </div>
               {media.voteAverage > 0 && (
                 <div className="flex items-center gap-1.5 text-yellow-500 font-black">
@@ -585,7 +677,11 @@ export function MediaDetailPage() {
               {media.releaseDate && (
                 <div className="flex items-center gap-2">
                   <Calendar size={14} className="text-blue-500" />
-                  <span>{new Date(media.releaseDate).getFullYear()}</span>
+                  <span>
+                    {media.type === 'movie'
+                      ? formatTmdbDateFr(media.releaseDate)
+                      : formatTmdbYear(media.releaseDate)}
+                  </span>
                 </div>
               )}
               {media?.type === 'tv' && tvSeasons.length > 0 && (
@@ -594,6 +690,7 @@ export function MediaDetailPage() {
                   <span>{tvSeasons.length} Saisons</span>
                 </div>
               )}
+              <OriginPlatformLogos platforms={originPlatforms} />
             </div>
 
             <div className="space-y-2 mb-10">
@@ -612,14 +709,85 @@ export function MediaDetailPage() {
                   BANDE-ANNONCE
                 </button>
               )}
+              {media.type === 'movie' && (
+                <button
+                  type="button"
+                  onClick={() => runQuickDownload({ kind: 'movie' })}
+                  disabled={quickDownloadLoading || movieInLibrary}
+                  title={movieInLibrary ? 'Déjà présent dans Emby' : undefined}
+                  className={`flex-1 sm:flex-none px-3 sm:px-6 py-2 sm:py-2.5 font-black text-[10px] sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl border transition-all tracking-widest disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 ${
+                    movieInLibrary
+                      ? 'bg-white/5 border-white/10 text-gray-500'
+                      : 'bg-emerald-600/90 hover:bg-emerald-500 text-white border-emerald-400/30 shadow-xl shadow-emerald-600/20 hover:scale-[1.02] active:scale-[0.98]'
+                  }`}
+                >
+                  <Download size={16} className="shrink-0 sm:w-[18px] sm:h-[18px]" />
+                  {quickDownloadLoading ? 'SCAN…' : movieInLibrary ? 'DÉJÀ PRÉSENT' : 'TÉLÉCHARGER'}
+                </button>
+              )}
               <button
                 onClick={handleTrack}
-                className="flex-1 sm:flex-none px-3 sm:px-6 py-2 sm:py-2.5 premium-gradient text-white font-black text-[10px] sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all tracking-widest"
+                disabled={media.type === 'movie' && movieAutomateLocked}
+                title={
+                  media.type === 'movie' && movieAutomateLocked
+                    ? movieInLibrary
+                      ? 'Déjà présent dans Emby'
+                      : 'Déjà demandé'
+                    : undefined
+                }
+                className={`flex-1 sm:flex-none px-3 sm:px-6 py-2 sm:py-2.5 font-black text-[10px] sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl transition-all tracking-widest disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 ${
+                  media.type === 'movie' && movieAutomateLocked
+                    ? 'bg-white/5 border border-white/10 text-gray-500'
+                    : 'premium-gradient text-white shadow-xl hover:scale-[1.02] active:scale-[0.98]'
+                }`}
               >
                 <BookmarkPlus size={16} className="shrink-0 sm:w-[18px] sm:h-[18px]" />
-                AUTOMATISER
+                {media.type === 'movie' && movieInLibrary
+                  ? 'DÉJÀ PRÉSENT'
+                  : media.type === 'movie' && movieAlreadyRequested
+                    ? 'DÉJÀ DEMANDÉ'
+                    : 'AUTOMATISER'}
               </button>
             </div>
+
+            {media.type === 'tv' && tvSeasons.length > 0 && (
+              <div className="mt-6 space-y-3">
+                <h3 className="text-[10px] sm:text-sm font-black text-emerald-400 uppercase tracking-widest">
+                  Télécharger une saison (pack)
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {tvSeasons.map((s) => {
+                    const n = s.season_number;
+                    const loading = quickDownloadSeasonLoading === n;
+                    const seasonComplete = completeSeasonNumbers.has(n);
+                    return (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => runQuickDownload({ kind: 'tv', seasonNumber: n })}
+                        disabled={
+                          seasonComplete ||
+                          quickDownloadSeasonLoading !== null ||
+                          quickDownloadLoading
+                        }
+                        title={seasonComplete ? 'Déjà disponible sur Emby' : undefined}
+                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                          seasonComplete
+                            ? 'border-white/10 bg-white/[0.02] text-gray-500'
+                            : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+                        }`}
+                      >
+                        <Download size={12} />
+                        {loading ? 'Scan…' : seasonComplete ? `S${n} · OK` : `S${n}`}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[10px] text-gray-500 font-medium">
+                  Envoie le meilleur pack saison s’il existe — sinon utilise la liste Sources
+                </p>
+              </div>
+            )}
 
             {media.type === 'tv' && (
               <TvShowSeasonStatusPanel rows={seasonStatusRows} mediaType={isAnime ? 'anime' : 'tv'} />
@@ -791,6 +959,20 @@ export function MediaDetailPage() {
         video={trailer}
         title={media ? `Bande-annonce — ${media.title}` : 'Bande-annonce'}
         onClose={() => setTrailerModalOpen(false)}
+      />
+
+      <ConfirmModal
+        isOpen={!!quickForcePending}
+        title="Déjà présent"
+        message="Ce média semble déjà disponible. Forcer l'envoi vers qBittorrent ?"
+        confirmLabel="Forcer"
+        onConfirm={async () => {
+          const pending = quickForcePending;
+          setQuickForcePending(null);
+          if (pending) await runQuickDownload(pending, true);
+        }}
+        onClose={() => setQuickForcePending(null)}
+        isDanger={true}
       />
 
       {seasonModalOpen && (

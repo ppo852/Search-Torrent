@@ -200,6 +200,10 @@ export async function initializeDatabase() {
       if (!tvNames.has('completed_at')) {
         await run(`ALTER TABLE tv_season_requests ADD COLUMN completed_at TEXT`);
       }
+      // Flag affichage « Émission » (Talk/Reality/News) — pas une catégorie Prowlarr.
+      if (!tvNames.has('is_broadcast_episodic')) {
+        await run(`ALTER TABLE tv_season_requests ADD COLUMN is_broadcast_episodic INTEGER`);
+      }
       await run(
         `UPDATE tv_season_requests
          SET completed_at = COALESCE(completed_at, last_checked_at, created_at)

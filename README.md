@@ -5,7 +5,7 @@
 Interface web moderne pour rechercher, suivre et télécharger vos médias via **Prowlarr** et **qBittorrent**.
 
 [![Docker Hub](https://img.shields.io/badge/Docker-ppo852%2Fsearch--torrent-blue?logo=docker)](https://hub.docker.com/r/ppo852/search-torrent)
-![Version](https://img.shields.io/badge/version-1.7.10-blue)
+![Version](https://img.shields.io/badge/version-1.7.11-blue)
 
 ## Fonctionnalités
 
@@ -135,6 +135,11 @@ Ces deux réglages sont le minimum pour que Search-Torrent puisse assigner une c
 - **Intégrations** — Prowlarr, qBittorrent, TMDB, Emby
 
 ## Notes de version
+
+### v1.7.11
+- **Téléchargement 1 clic** — depuis la fiche, envoie le meilleur film ou le meilleur pack de saison vers qBittorrent
+- **Boutons grisés** — si le film / la saison est déjà sur Emby, ou déjà demandé, on ne peut plus recliquer par erreur
+- **Fiche plus claire** — logos des chaînes / studios, genres en français (ex. Émission), fond et infos mieux présentés
 
 ### v1.7.10
 - **Pertinence sources** — rejette les suites (II, Part 2…) quand le titre demandé ne les contient pas (ex. Street Fighter 2026 ≠ Street Fighter II)

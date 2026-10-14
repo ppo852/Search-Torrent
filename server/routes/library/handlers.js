@@ -5,7 +5,8 @@ import qBittorrentService from '../../services/qbittorrent/index.js';
 import autoSearchService from '../../services/auto-search/index.js';
 import mediaInventoryService from '../../services/media-inventory/index.js';
 import prowlarrSearchService, {
-  isCompleteSeasonTitle
+  isCompleteSeasonTitle,
+  SEARCH_MODE,
 } from '../../services/prowlarr/search.js';
 import { isEpisodeTorrentTitle } from '../../services/utils/episode-title.js';
 import tmdbService from '../../services/tmdb/index.js';
@@ -521,7 +522,8 @@ export async function searchTvSeasonRequestHandler(req, res) {
       mediaType: requestItem.media_type,
       seasonNumber: requestItem.season_number,
       minSeeds,
-      episodeCount
+      episodeCount,
+      searchMode: SEARCH_MODE.REQUEST,
     });
 
     const profiles = await getSetting('quality_profiles');
@@ -813,13 +815,40 @@ export async function listTvSeasonRequestsHandler(req, res) {
       `SELECT tr.id, tr.user_id, tr.tmdb_id, tr.media_type, tr.title, tr.poster_url, tr.season_number,
               tr.status, tr.next_episode_number, tr.last_checked_at, tr.last_error,
               tr.matched_torrent_name, tr.matched_torrent_magnet, tr.matched_torrent_size, tr.matched_torrent_seeds,
-              tr.created_at,
+              tr.created_at, tr.is_broadcast_episodic,
               u.username as requested_by
        FROM tv_season_requests tr
        LEFT JOIN users u ON u.id = tr.user_id
        ORDER BY tr.created_at DESC`
     );
 
+    // Backfill libellé Émission pour les anciennes demandes (NULL).
+    const unresolvedIds = [
+      ...new Set(
+        (items || [])
+          .filter((r) => r.is_broadcast_episodic == null && r.tmdb_id)
+          .map((r) => Number(r.tmdb_id))
+          .filter((id) => Number.isInteger(id) && id > 0)
+      ),
+    ];
+    for (const tmdbId of unresolvedIds) {
+      let flag = 0;
+      try {
+        const info = await tmdbService.getDetailedInfo(tmdbId, 'tv');
+        if (info?.isBroadcastEpisodic) flag = 1;
+      } catch {
+        // leave 0
+      }
+      await run(
+        `UPDATE tv_season_requests SET is_broadcast_episodic = ? WHERE tmdb_id = ? AND is_broadcast_episodic IS NULL`,
+        [flag, tmdbId]
+      );
+      for (const row of items || []) {
+        if (Number(row.tmdb_id) === tmdbId && row.is_broadcast_episodic == null) {
+          row.is_broadcast_episodic = flag;
+        }
+      }
+    }
     res.json(items || []);
   } catch (error) {
     logger.error('Erreur lors de la récupération du suivi tv_season_requests:', error);
@@ -979,6 +1008,15 @@ export async function createTvSeasonRequestsHandler(req, res) {
     }
 
     const now = new Date().toISOString();
+    // Talk / Reality / News → libellé « Émission » (media_type reste tv/anime).
+    let isBroadcastEpisodic = 0;
+    try {
+      const info = await tmdbService.getDetailedInfo(tmdb_id, 'tv');
+      if (info?.isBroadcastEpisodic) isBroadcastEpisodic = 1;
+    } catch {
+      // ignore
+    }
+
     const created = [];
     const createdForAutoSearch = [];
     const conflicts = [];
@@ -1049,8 +1087,8 @@ export async function createTvSeasonRequestsHandler(req, res) {
       await run(
         `INSERT INTO tv_season_requests (
           id, user_id, tmdb_id, media_type, title, poster_url, season_number,
-          status, next_episode_number, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          status, next_episode_number, created_at, is_broadcast_episodic
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id,
           req.user.id,
@@ -1061,7 +1099,8 @@ export async function createTvSeasonRequestsHandler(req, res) {
           seasonNumber,
           'monitoring',
           1,
-          now
+          now,
+          isBroadcastEpisodic,
         ]
       );
 
@@ -1076,6 +1115,7 @@ export async function createTvSeasonRequestsHandler(req, res) {
         status: 'monitoring',
         next_episode_number: 1,
         created_at: now,
+        is_broadcast_episodic: isBroadcastEpisodic,
         present_episodes: presentEpisodes,
         missing_episodes: missingEpisodes
       });
@@ -1218,6 +1258,7 @@ export async function searchLibraryItemHandler(req, res) {
       tmdbId: requestItem.tmdb_id,
       mediaType: requestItem.media_type,
       minSeeds,
+      searchMode: SEARCH_MODE.REQUEST,
     };
 
     const searchResults = isMovieLikeMediaType(requestItem.media_type)

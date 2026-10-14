@@ -192,7 +192,7 @@ export function HomePage() {
                   Catalogue
                 </span>
                 <div>
-                  <h2 className="text-lg md:text-xl font-bold text-white">Nouveautés</h2>
+                  <h2 className="text-lg md:text-xl font-bold text-blue-400">Nouveautés</h2>
                   <p className="text-xs text-gray-500 mt-0.5">
                     Sorties cinéma, plateformes et tendances (TMDB)
                   </p>

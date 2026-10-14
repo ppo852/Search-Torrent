@@ -3,12 +3,15 @@
  */
 
 import fetch from 'node-fetch';
-import prowlarrSearchService, {
-  splitQueryTitleAndYear,
-} from '../../services/prowlarr/search.js';
+import prowlarrSearchService from '../../services/prowlarr/search.js';
+import {
+  quickDownloadMovie,
+  quickDownloadTvSeason,
+} from '../../services/prowlarr/quick-download.js';
 import { getSetting, resolveMinSeeds } from '../../services/settings/index.js';
 import { getResultCompatibility } from '../../services/utils/validation.js';
 import { loadAssignedQualityProfile } from '../../services/utils/helpers.js';
+import { logActivity } from '../../services/activity-log/index.js';
 
 /**
  * Test connexion Prowlarr (admin). Accepte url/api_key en body pour tester avant sauvegarde.
@@ -125,7 +128,8 @@ export async function searchTvSeriesHandler(req, res) {
 }
 
 /**
- * Recherche générale (toutes catégories)
+ * Recherche générale (musique / livres / logiciels / all).
+ * Film / série / anime / animation : via TMDB → fiche → /search/movie ou /search/tv.
  */
 export async function searchGeneralHandler(req, res) {
   try {
@@ -135,53 +139,111 @@ export async function searchGeneralHandler(req, res) {
       return res.status(400).json({ error: 'Query requis' });
     }
 
+    if (
+      category === 'movies' ||
+      category === 'animation' ||
+      category === 'tv' ||
+      category === 'anime'
+    ) {
+      return res.status(400).json({
+        error:
+          'Film / série : utiliser la fiche média (/search/movie ou /search/tv), pas la recherche générale',
+      });
+    }
+
     const minSeeds = await resolveMinSeeds();
-
-    // For movies / animation films, use the movie search with relevance filtering
-    if (category === 'movies' || category === 'animation') {
-      const { title, year } = splitQueryTitleAndYear(query);
-
-      const results = await prowlarrSearchService.searchMovie({
-        title,
-        year,
-        tmdbId: null,
-        mediaType: category === 'animation' ? 'animation' : 'movie',
-        minSeeds,
-      });
-
-      return res.json({
-        results: await withInteractiveProfileCompatibility(
-          results,
-          category === 'animation' ? 'animation' : 'movie'
-        ),
-      });
-    }
-
-    // For TV/anime, use series search
-    if (category === 'tv' || category === 'anime') {
-      const { title, year } = splitQueryTitleAndYear(query);
-
-      const results = await prowlarrSearchService.searchTvSeries({
-        title,
-        year,
-        mediaType: category,
-        minSeeds
-      });
-
-      return res.json({
-        results: await withInteractiveProfileCompatibility(results, category),
-      });
-    }
 
     const results = await prowlarrSearchService.searchGeneral({
       query,
       category: category === 'all' ? null : (category || null),
-      minSeeds
+      minSeeds,
     });
 
     res.json({ results });
   } catch (error) {
     console.error('Erreur recherche générale:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+}
+
+/**
+ * Téléchargement 1-clic (interactif) : meilleur film ou pack saison → qBit.
+ * Ne crée pas de demande.
+ */
+export async function quickDownloadHandler(req, res) {
+  try {
+    const {
+      kind,
+      title,
+      year,
+      tmdbId,
+      mediaType,
+      seasonNumber,
+      force,
+    } = req.body || {};
+
+    if (!title) {
+      return res.status(400).json({ ok: false, reason: 'invalid_params', error: 'Titre requis' });
+    }
+
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ ok: false, reason: 'unauthorized', error: 'Non authentifié' });
+    }
+
+    const isTv = kind === 'tv' || kind === 'anime' || mediaType === 'tv' || mediaType === 'anime';
+
+    let result;
+    if (isTv) {
+      result = await quickDownloadTvSeason({
+        userId,
+        title,
+        year: year || '',
+        tmdbId: tmdbId || null,
+        mediaType: mediaType === 'anime' || kind === 'anime' ? 'anime' : 'tv',
+        seasonNumber,
+        force: force === true,
+      });
+    } else {
+      result = await quickDownloadMovie({
+        userId,
+        title,
+        year: year || '',
+        tmdbId: tmdbId || null,
+        mediaType: mediaType === 'animation' ? 'animation' : 'movie',
+        force: force === true,
+      });
+    }
+
+    if (result.ok) {
+      await logActivity({
+        eventType: 'download.quick_interactive',
+        actorUsername: req.user?.username || null,
+        targetLabel: result.torrentName || title,
+        details: {
+          kind: isTv ? 'tv_season' : 'movie',
+          tmdb_id: tmdbId ?? null,
+          season_number: result.seasonNumber ?? null,
+        },
+      }).catch(() => {});
+      return res.json(result);
+    }
+
+    if (result.reason === 'already_present') {
+      return res.status(result.status || 409).json(result);
+    }
+    if (result.reason === 'invalid_params') {
+      return res.status(result.status || 400).json(result);
+    }
+
+    // no_results / no_pack
+    return res.status(404).json(result);
+  } catch (error) {
+    console.error('Erreur quick-download:', error);
+    res.status(500).json({
+      ok: false,
+      reason: 'error',
+      error: error instanceof Error ? error.message : 'Erreur serveur',
+    });
   }
 }

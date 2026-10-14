@@ -92,17 +92,30 @@ export function getProwlarrCategoryId(mediaType) {
  */
 async function fetchVariants(tmdbId, type) {
   if (!tmdbId) {
-    return { variants: [], originalTitle: null, isDocumentary: false, isBroadcastEpisodic: false };
+    return {
+      variants: [],
+      originalTitle: null,
+      isDocumentary: false,
+      isBroadcastEpisodic: false,
+      year: null,
+    };
   }
   const info = await tmdbService.getDetailedInfo(tmdbId, type);
   if (!info) {
-    return { variants: [], originalTitle: null, isDocumentary: false, isBroadcastEpisodic: false };
+    return {
+      variants: [],
+      originalTitle: null,
+      isDocumentary: false,
+      isBroadcastEpisodic: false,
+      year: null,
+    };
   }
   return {
     variants: info.titles || [],
     originalTitle: info.originalTitle || info.mainTitle,
     isDocumentary: !!info.isDocumentary,
     isBroadcastEpisodic: !!info.isBroadcastEpisodic,
+    year: info.year || null,
   };
 }
 
@@ -119,6 +132,13 @@ function isSequelSuffixToken(word) {
   return false;
 }
 
+/** Tokens release après le titre (année, qualité, langue…) — pas un mot de titre plus long. */
+function isMediaOrReleaseToken(word) {
+  return /^(s\d+(e\d+)?|e\d+|\d{4}|1080p|720p|2160p|4k|uhd|vostfr|vost|french|truefrench|multi|vf|vff|vfq|vo|bluray|web|webdl|web-dl|webrip|hdrip|hdtv|h264|x264|h265|x265|hevc|avc|xvid|aac|eac3|ac3|dts|atmos|ad|proper|repack|extended|remastered|uncut|internal|limited|subforced|forced)$/i.test(
+    String(word || '')
+  );
+}
+
 /** Index du 1er enchaînement exact des mots du titre dans le nom normalisé découpé. */
 function findTitleWordSequenceIndex(nameWords, titleWords) {
   if (!titleWords.length || nameWords.length < titleWords.length) return -1;
@@ -131,7 +151,7 @@ function findTitleWordSequenceIndex(nameWords, titleWords) {
   return -1;
 }
 
-function checkSingleTitleStrict(n, requestedTitle) {
+function checkSingleTitleStrict(n, requestedTitle, opts = {}) {
   const t = normalize(requestedTitle).replace(/\s+/g, ' ');
   if (!t) return false;
 
@@ -141,14 +161,14 @@ function checkSingleTitleStrict(n, requestedTitle) {
 
   const nWordsRaw = n.split(/[\s._-]+/).filter(Boolean);
   const tWordsRaw = t.split(/[\s._-]+/).filter(Boolean);
+  const rejectExtraTitleWords = opts.rejectExtraTitleWords === true;
 
   if (tWordsRaw.length === 1) {
     const titleWord = tWordsRaw[0];
     const indexInName = nWordsRaw.indexOf(titleWord);
     if (indexInName !== -1 && nWordsRaw.length > indexInName + 1) {
       const nextWord = nWordsRaw[indexInName + 1];
-      const mediaTokenRegex = /^(s\d+(e\d+)?|e\d+|\d{4}|1080p|720p|2160p|4k|uhd|vostfr|vost|french|multi|vf|bluray|web-dl|webrip|hdrip|h264|x264|h265|x265|hevc)$/i;
-      if (!mediaTokenRegex.test(nextWord)) return false;
+      if (!isMediaOrReleaseToken(nextWord)) return false;
     }
   } else {
     // Street Fighter ≠ Street Fighter II / Part 2 (sauf si le titre demandé finit déjà par ce numéro)
@@ -157,6 +177,10 @@ function checkSingleTitleStrict(n, requestedTitle) {
       const nextWord = nWordsRaw[titleIdx + tWordsRaw.length];
       const requestedAlreadySequel = isSequelSuffixToken(tWordsRaw[tWordsRaw.length - 1]);
       if (!requestedAlreadySequel && isSequelSuffixToken(nextWord)) {
+        return false;
+      }
+      // Film (interactive + demande) : L'Odyssée ≠ L'Odyssée de Céleste (mot suivant ≠ token release)
+      if (rejectExtraTitleWords && !isMediaOrReleaseToken(nextWord)) {
         return false;
       }
     }
@@ -188,12 +212,45 @@ function checkSingleTitleStrict(n, requestedTitle) {
 }
 
 /**
- * Check if a torrent name is relevant
+ * interactive = page Recherche (large).
+ * request = demandes manuelles / auto-scan (règles plus strictes, isolées ci-dessous).
  */
-export function isRelevantResult(torrentName, requestedTitles, year, seasonNumber) {
+export const SEARCH_MODE = {
+  INTERACTIVE: 'interactive',
+  REQUEST: 'request',
+};
+
+export function isRequestSearchMode(searchMode) {
+  return searchMode === SEARCH_MODE.REQUEST;
+}
+
+/**
+ * Marqueurs série (Season / S01 / S01E01…). Utilisé par le filtre film (interactive + demande).
+ */
+export function hasTvSeasonOrEpisodeMarker(torrentName) {
+  const t = String(torrentName || '');
+  if (isCompleteSeasonTitle(t)) return true;
+  return /(?:^|[^a-z0-9])(?:s\d{1,2}(?:e\d{1,3})?|season\s*\d+|saison\s*\d+|\d{1,2}x\d{1,3})(?:[^a-z0-9]|$)/i.test(
+    t
+  );
+}
+
+/**
+ * Check if a torrent name is relevant
+ * @param {object} [opts]
+ * @param {boolean} [opts.rejectSeriesMarkers] — film : rejette packs/marqueurs série (activé interactive + demande)
+ * @param {boolean} [opts.rejectExtraTitleWords] — film : titre plus long ≠ match (activé interactive + demande)
+ */
+export function isRelevantResult(torrentName, requestedTitles, year, seasonNumber, opts = {}) {
   if (!requestedTitles) return true;
   const titles = Array.isArray(requestedTitles) ? requestedTitles : [requestedTitles];
   const n = normalize(torrentName).replace(/\s+/g, ' ');
+
+  // Film : anti packs série (indépendant de SEARCH_MODE)
+  if (opts.rejectSeriesMarkers === true && hasTvSeasonOrEpisodeMarker(torrentName)) {
+    logger.debug(`[Filter] REJETÉ: "${torrentName}" (marqueur série — filtre film)`);
+    return false;
+  }
 
   // Filtre de saison (CRITIQUE pour les séries)
   if (seasonNumber) {
@@ -223,7 +280,11 @@ export function isRelevantResult(torrentName, requestedTitles, year, seasonNumbe
     }
   }
 
-  const matched = titles.some(title => checkSingleTitleStrict(n, title));
+  const matched = titles.some((title) =>
+    checkSingleTitleStrict(n, title, {
+      rejectExtraTitleWords: opts.rejectExtraTitleWords === true,
+    })
+  );
   if (!matched) {
     logger.debug(`[Filter] REJETÉ: "${torrentName}" (Titre non correspondant)`);
   } else {
@@ -235,12 +296,11 @@ export function isRelevantResult(torrentName, requestedTitles, year, seasonNumbe
 
 /**
  * Variantes texte : original d'abord, puis titre local.
- * Priorité : saison → année → titre seul.
- * S’il y a année ou saison : jusqu’à 2 requêtes « qualifiées », puis jusqu’à 2 titres seuls
- * (sinon le plafond de 2 mangeait les deux slots en « titre+année » et le sans-année ne partait jamais).
- * Sans année/saison : max 2 titres seuls.
+ * Interactive : saison → année → titre seul (jusqu’à 2+2).
+ * Request : pas de titre nu ; si Sxx+année → « titre Sxx année » pour ne jamais perdre l’année.
  */
-export function prepareQueries(baseTitle, originalTitle, year, seasonNumber) {
+export function prepareQueries(baseTitle, originalTitle, year, seasonNumber, opts = {}) {
+  const includeBareWithoutQualifier = opts.includeBareWithoutQualifier !== false;
   const seen = new Set();
   const pushInto = (list, query) => {
     const q = String(query || '').trim();
@@ -254,9 +314,11 @@ export function prepareQueries(baseTitle, originalTitle, year, seasonNumber) {
     originalTitle && originalTitle !== baseTitle ? simplifyTitle(originalTitle) : '';
   const titles = [ost, st].filter(Boolean);
   const sToken = seasonNumber ? `S${pad2(seasonNumber)}` : null;
-  const hasQualifier = Boolean(sToken || year);
+  const yearStr = year ? String(year) : '';
+  const hasQualifier = Boolean(sToken || yearStr);
 
   if (!hasQualifier) {
+    if (!includeBareWithoutQualifier) return [];
     const bare = [];
     for (const t of titles) pushInto(bare, t);
     return bare.slice(0, 2);
@@ -264,14 +326,25 @@ export function prepareQueries(baseTitle, originalTitle, year, seasonNumber) {
 
   const qualified = [];
   const bare = [];
+
+  // REQUEST : combiner Sxx + année pour éviter homonymes (2 titres ne mangent plus l’année).
+  if (!includeBareWithoutQualifier && sToken && yearStr) {
+    for (const t of titles) {
+      pushInto(qualified, `${t} ${sToken} ${yearStr}`);
+    }
+    return qualified.slice(0, 2);
+  }
+
   for (const t of titles) {
     if (sToken) pushInto(qualified, `${t} ${sToken}`);
   }
   for (const t of titles) {
-    if (year) pushInto(qualified, `${t} ${year}`);
+    if (yearStr) pushInto(qualified, `${t} ${yearStr}`);
   }
-  for (const t of titles) {
-    pushInto(bare, t);
+  if (includeBareWithoutQualifier) {
+    for (const t of titles) {
+      pushInto(bare, t);
+    }
   }
 
   // 2 avec saison/année, puis 2 sans — le seuil TEXT_SEARCH_ENOUGH_RESULTS coupe tôt si déjà riche.
@@ -326,6 +399,8 @@ export function processSearchResults(rawResults, options = {}) {
     seasonNumber = null,
     filterMovieExtras = false,
     movieTitleVariants = [],
+    rejectSeriesMarkers = false,
+    rejectExtraTitleWords = false,
   } = options;
 
   const relevanceTitles = validTitles || (baseTitle ? [baseTitle] : []);
@@ -359,7 +434,14 @@ export function processSearchResults(rawResults, options = {}) {
 
   // Filtrage
   if (minSeeds > 0) results = results.filter(r => r.seeds >= minSeeds);
-  if (filterByRelevance) results = results.filter(r => isRelevantResult(r.name, relevanceTitles, year, seasonNumber));
+  if (filterByRelevance) {
+    results = results.filter((r) =>
+      isRelevantResult(r.name, relevanceTitles, year, seasonNumber, {
+        rejectSeriesMarkers,
+        rejectExtraTitleWords,
+      })
+    );
+  }
 
   let extrasFilteredOnly = false;
   if (filterMovieExtras) {
@@ -549,9 +631,15 @@ export async function searchMovieDetailed({
   minSeeds = 0,
   qualityProfile = null,
   expandTextSearch = false,
+  /** Défaut interactive : page Recherche. Passer SEARCH_MODE.REQUEST pour les demandes. */
+  searchMode = SEARCH_MODE.INTERACTIVE,
 }) {
+  const requestMode = isRequestSearchMode(searchMode);
   const tmdbType = resolveMovieMediaType(mediaType);
-  const { variants, originalTitle, isDocumentary } = await fetchVariants(tmdbId, 'movie');
+  const { variants, originalTitle, isDocumentary, year: tmdbYear } = await fetchVariants(
+    tmdbId,
+    'movie'
+  );
   // Une seule liste : pertinence + filtre making-of / bonus.
   const titleVariants = [
     ...new Set(
@@ -565,13 +653,19 @@ export async function searchMovieDetailed({
   // Making-of / docu : variantes « cœur » pour matcher Title.Making.Of / Title.DOC
   const relevanceTitles = expandTitleVariantsForRelevance(titleVariants, { isDocumentary });
 
+  // REQUEST : année appelant, sinon TMDB (toujours pour désambiguïser).
+  const effectiveYear = year || (requestMode ? tmdbYear : null) || '';
+
   const idRaw = await runIndexerIdSearch({
     kind: 'movie',
     tmdbId,
     mediaType: tmdbType,
   });
 
-  const queries = prepareQueries(title, originalTitle || title, year);
+  const queries = prepareQueries(title, originalTitle || title, effectiveYear, null, {
+    // REQUEST : pas de titre nu. INTERACTIVE : inchangé.
+    includeBareWithoutQualifier: !requestMode,
+  });
   return processWithIdTitleFallback({
     idRaw,
     textQueries: queries,
@@ -580,13 +674,16 @@ export async function searchMovieDetailed({
     processOptions: {
       baseTitle: title,
       validTitles: relevanceTitles,
-      year,
+      year: effectiveYear,
       minSeeds,
       qualityProfile,
       filterByRelevance: true,
       sortBy: qualityProfile?.sort_by,
       filterMovieExtras,
       movieTitleVariants: titleVariants,
+      // Tous les films : packs série + titres plus longs (L'Odyssée ≠ … de Céleste). Indépendant de SEARCH_MODE.
+      rejectSeriesMarkers: true,
+      rejectExtraTitleWords: true,
     },
   });
 }
@@ -606,11 +703,19 @@ export async function searchTvSeries({
   qualityProfile = null,
   episodeCount = 1,
   expandTextSearch = false,
+  /** Défaut interactive. Passer SEARCH_MODE.REQUEST pour les demandes. */
+  searchMode = SEARCH_MODE.INTERACTIVE,
 }) {
-  const { variants, originalTitle, isBroadcastEpisodic } = await fetchVariants(tmdbId, 'tv');
+  const requestMode = isRequestSearchMode(searchMode);
+  const { variants, originalTitle, isBroadcastEpisodic, year: tmdbYear } = await fetchVariants(
+    tmdbId,
+    'tv'
+  );
   const finalVariants = variants.length > 0 ? variants : [title];
   // Émissions (Talk/Reality/News) : date d’épisode dans le release ≠ année de 1ʳᵉ diffusion.
-  const effectiveYear = isBroadcastEpisodic ? '' : year;
+  // REQUEST : année appelant ou TMDB (first_air_date) pour éviter homonymes.
+  const resolvedYear = year || (requestMode ? tmdbYear : null) || '';
+  const effectiveYear = isBroadcastEpisodic ? '' : resolvedYear;
 
   const idRaw = await runIndexerIdSearch({
     kind: 'tv',
@@ -619,7 +724,9 @@ export async function searchTvSeries({
     mediaType,
   });
 
-  const queries = prepareQueries(title, originalTitle || title, effectiveYear, seasonNumber);
+  const queries = prepareQueries(title, originalTitle || title, effectiveYear, seasonNumber, {
+    includeBareWithoutQualifier: !requestMode,
+  });
   const { results } = await processWithIdTitleFallback({
     idRaw,
     textQueries: queries,
@@ -707,4 +814,6 @@ export default {
   isRelevantResult,
   getProwlarrCategoryId,
   isCompleteSeasonTitle,
+  hasTvSeasonOrEpisodeMarker,
+  SEARCH_MODE,
 };

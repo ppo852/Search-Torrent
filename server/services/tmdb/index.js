@@ -73,6 +73,8 @@ class TmdbService {
         }
 
         const genres = (data.genres || []).map((g) => ({ id: g.id, name: g.name }));
+        const dateStr = type === 'movie' ? data.release_date : data.first_air_date;
+        const yearNum = dateStr ? Number(String(dateStr).slice(0, 4)) : NaN;
 
         return {
           tmdbId,
@@ -81,6 +83,8 @@ class TmdbService {
           originalTitle: type === 'movie' ? data.original_title : data.original_name,
           titles: Array.from(titles).filter(Boolean),
           genres,
+          /** Année TMDB (release_date / first_air_date) — utile pour désambiguïser les homonymes. */
+          year: Number.isFinite(yearNum) && yearNum > 0 ? yearNum : null,
           isDocumentary: genres.some((g) => g.id === TMDB_DOCUMENTARY_GENRE_ID),
           /** Talk / Reality / News : ne pas filtrer les torrents sur l’année de 1ʳᵉ diffusion. */
           isBroadcastEpisodic: isBroadcastEpisodicGenres(genres),

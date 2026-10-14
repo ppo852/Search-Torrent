@@ -822,6 +822,53 @@ class API {
     return response.json();
   }
 
+  /**
+   * Téléchargement 1-clic (interactif) : meilleur film ou pack saison → qBit.
+   * Ne crée pas de demande. 404 = no_results/no_pack ; 409 = déjà présent.
+   */
+  async quickDownload(payload: {
+    kind: 'movie' | 'tv';
+    title: string;
+    year?: string;
+    tmdbId?: number;
+    mediaType?: 'movie' | 'animation' | 'tv' | 'anime';
+    seasonNumber?: number;
+    force?: boolean;
+  }): Promise<{
+    ok: boolean;
+    torrentName?: string;
+    seasonNumber?: number;
+    reason?: string;
+    error?: string;
+    present?: boolean;
+    status?: number;
+  }> {
+    const response = await fetch('/api/prowlarr/quick-download', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(payload),
+    });
+
+    if (response.status === 401) {
+      useAuthStore.getState().logout();
+      window.location.href = '/login';
+      throw new Error('Session expirée. Veuillez vous reconnecter.');
+    }
+
+    const body = await response.json().catch(() => ({}));
+    if (response.ok) {
+      return body;
+    }
+
+    return {
+      ok: false,
+      ...body,
+      reason: body?.reason || 'error',
+      error: body?.error || body?.message,
+      status: response.status,
+    };
+  }
+
   async getSystemHealth() {
     const response = await fetch('/api/system/health', {
       headers: this.getHeaders()

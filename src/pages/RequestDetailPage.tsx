@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, Search, Trash2, XCircle } from 'lucide-react';
+import { ArrowLeft, Calendar, CheckCircle2, Search, Star, Trash2, XCircle } from 'lucide-react';
 import { api } from '../services/api';
 import { tmdbAPI } from '../services/tmdb/tmdb';
 import { useAuthStore } from '../stores/authStore';
@@ -12,6 +12,12 @@ import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { globalSettings } from '../services/settings';
 import { showErrorToast, showToast } from '../stores/toastStore';
 import { getRequestStatusBadge } from '../lib/request-status-labels';
+import { getRequestMediaKindLabel, getTmdbGenreLabel } from '../lib/tmdb-genre-labels';
+import { TMDB_ANIMATION_GENRE_ID } from '../lib/tmdb-category-filter';
+import { formatTmdbDateFr, formatTmdbYear, type TmdbGenreRef } from '../lib/tmdb-meta';
+import type { TmdbOriginPlatform } from '../lib/tmdb-origin-platforms';
+import { OriginPlatformLogos } from '../components/ui/OriginPlatformLogos';
+import { TmdbFullscreenBackdrop } from '../components/ui/TmdbFullscreenBackdrop';
 import { formatRequestErrorMessage } from '../lib/request-error-messages';
 import { notifyMovieAutoSearchResult } from '../lib/movie-auto-search-toasts';
 import { isAlreadyPresentConflict, resolveForceDownloadPermission } from '../lib/force-download-permission';
@@ -64,6 +70,10 @@ export function RequestDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [backdropPath, setBackdropPath] = useState<string | null>(null);
   const [overview, setOverview] = useState<string>('');
+  const [tmdbGenres, setTmdbGenres] = useState<TmdbGenreRef[]>([]);
+  const [tmdbReleaseDate, setTmdbReleaseDate] = useState<string | null>(null);
+  const [tmdbVoteAverage, setTmdbVoteAverage] = useState<number>(0);
+  const [originPlatforms, setOriginPlatforms] = useState<TmdbOriginPlatform[]>([]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalLoading, setModalLoading] = useState(false);
@@ -96,7 +106,18 @@ export function RequestDetailPage() {
             setBackdropPath(`https://image.tmdb.org/t/p/original${data.backdrop_path}`);
           }
           setOverview(data?.overview || '');
-        } catch (e) { }
+          setTmdbGenres(Array.isArray(data?.genres) ? data.genres : []);
+          setTmdbReleaseDate(
+            tmdbType === 'movie' ? data?.release_date || null : data?.first_air_date || null
+          );
+          setTmdbVoteAverage(Number(data?.vote_average) || 0);
+          setOriginPlatforms(Array.isArray(data?.originPlatforms) ? data.originPlatforms : []);
+        } catch (e) {
+          setTmdbGenres([]);
+          setTmdbReleaseDate(null);
+          setTmdbVoteAverage(0);
+          setOriginPlatforms([]);
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
@@ -228,93 +249,124 @@ export function RequestDetailPage() {
 
   const canManage = Boolean(user?.is_admin || item.user_id === user?.id);
   const requestErrorMessage = formatRequestErrorMessage(item.last_error);
+  const isMovieLike = item.media_type === 'movie' || item.media_type === 'animation';
+  const displayGenres = tmdbGenres.filter(
+    (g) => !(item.media_type === 'animation' && g.id === TMDB_ANIMATION_GENRE_ID)
+  );
+  const dateLabel = isMovieLike
+    ? formatTmdbDateFr(tmdbReleaseDate || item.release_date)
+    : formatTmdbYear(tmdbReleaseDate || item.release_date);
 
   return (
-    <div className="animate-premium-fade relative min-h-screen">
-      {backdropPath && (
-        <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
-          <img
-            src={backdropPath}
-            alt=""
-            className="absolute inset-0 w-full h-full object-cover opacity-[0.28] scale-[1.02]"
-          />
-          <div className="absolute inset-0 bg-gray-950/50 backdrop-blur-[1px]" />
-          <div className="absolute inset-0 bg-gradient-to-b from-gray-950/75 via-transparent to-gray-950" />
-          <div className="absolute inset-0 bg-gradient-to-r from-gray-950/65 via-transparent to-gray-950/65" />
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                'radial-gradient(ellipse 85% 75% at 50% 40%, transparent 45%, rgba(3,7,18,0.3) 100%)',
-            }}
-          />
-        </div>
-      )}
+    <div className="animate-premium-fade relative min-h-screen pb-20">
+      <TmdbFullscreenBackdrop src={backdropPath} />
 
       <div className="relative z-10 space-y-8">
-        <div className="flex items-center justify-between">
-          <button onClick={() => navigate('/library')} className="flex items-center gap-2 text-blue-400/70 hover:text-blue-200 group transition-all">
-            <div className="p-2 rounded-2xl bg-blue-600/10 border border-blue-500/20 group-hover:bg-blue-600/20 transition-colors"><ArrowLeft size={18} /></div>
-            <span className="font-bold tracking-tight">Demandes</span>
-          </button>
-          <button onClick={load} className="px-6 py-2 rounded-2xl bg-blue-600/10 border border-blue-500/25 text-blue-300 font-bold hover:bg-blue-600/20 transition-all uppercase text-[10px] tracking-widest">Rafraîchir</button>
-        </div>
+          <div className="flex items-center justify-between">
+            <button onClick={() => navigate('/library')} className="flex items-center gap-2 text-blue-400/70 hover:text-blue-200 group transition-all">
+              <div className="p-2 rounded-2xl bg-blue-600/10 border border-blue-500/20 group-hover:bg-blue-600/20 transition-colors"><ArrowLeft size={18} /></div>
+              <span className="font-bold tracking-tight">Demandes</span>
+            </button>
+            <button onClick={load} className="px-6 py-2 rounded-2xl bg-blue-600/10 border border-blue-500/25 text-blue-300 font-bold hover:bg-blue-600/20 transition-all uppercase text-[10px] tracking-widest">Rafraîchir</button>
+          </div>
 
-        <div className="p-8 rounded-[2rem] border border-transparent bg-white/[0.03] shadow-[0_16px_64px_rgba(37,99,235,0.12)] backdrop-blur-xl">
-          <div className="flex flex-col md:flex-row gap-10">
-            <div className="w-32 md:w-48 lg:w-64 flex-shrink-0 mx-auto md:mx-0">
-              <div className="overflow-hidden rounded-[1.75rem] shadow-[0_12px_40px_rgba(0,0,0,0.45)] rotate-1 ring-1 ring-blue-500/15">
-                {item.poster_url ? <img src={item.poster_url} alt={item.title} className="w-full h-auto object-cover" /> : <div className="aspect-[2/3] flex items-center justify-center bg-gray-900 text-gray-600 font-black uppercase text-xs">No Poster</div>}
-              </div>
-            </div>
-
-            <div className="flex-1 space-y-6">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <h1 className="text-2xl lg:text-3xl font-black text-white tracking-tighter uppercase mb-2">{item.title}</h1>
-                  <div className="flex flex-wrap items-center gap-4 text-xs font-bold text-blue-400/70 uppercase tracking-widest">
-                    {item.release_date && <span>{item.release_date.split('-')[0]}</span>}
-                    {item.requested_by && <span className="flex items-center gap-2"><CheckCircle2 size={14} />Par {item.requested_by}</span>}
-                  </div>
+          <div className="p-8 rounded-[2rem] border border-blue-500/10 bg-white/[0.03] shadow-[0_16px_64px_rgba(37,99,235,0.12)] backdrop-blur-xl">
+            <div className="flex flex-col md:flex-row gap-10">
+              <div className="w-32 md:w-48 lg:w-64 flex-shrink-0 mx-auto md:mx-0">
+                <div className="overflow-hidden rounded-[1.75rem] shadow-[0_12px_40px_rgba(0,0,0,0.45)] rotate-1 ring-1 ring-blue-500/15">
+                  {item.poster_url ? <img src={item.poster_url} alt={item.title} className="w-full h-auto object-cover" /> : <div className="aspect-[2/3] flex items-center justify-center bg-gray-900 text-gray-600 font-black uppercase text-xs">No Poster</div>}
                 </div>
-                {(() => {
-                  const badge = getRequestStatusBadge(item.status, item.media_type);
-                  return (
-                    <div className={`px-4 py-1.5 rounded-2xl border text-[10px] font-black uppercase tracking-widest ${badge.className}`}>
-                      {badge.label}
+              </div>
+
+              <div className="flex-1 space-y-6">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-4 mb-4">
+                      <div
+                        className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${
+                          item.media_type === 'animation'
+                            ? 'bg-pink-500/10 border-pink-500/20 text-pink-400'
+                            : 'bg-blue-600/20 border-blue-500/50 text-blue-400'
+                        }`}
+                      >
+                        {getRequestMediaKindLabel(item.media_type)}
+                      </div>
+                      {tmdbVoteAverage > 0 && (
+                        <div className="flex items-center gap-1.5 text-yellow-500 font-black">
+                          <Star size={16} fill="currentColor" />
+                          <span>{tmdbVoteAverage.toFixed(1)}</span>
+                        </div>
+                      )}
                     </div>
-                  );
-                })()}
-              </div>
-
-              <div className="space-y-2">
-                <h3 className="text-[10px] font-black text-blue-400/70 uppercase tracking-widest">Synopsis</h3>
-                <ExpandableText text={overview || "Aucune description."} maxLines={3} className="max-w-4xl" />
-              </div>
-
-              {requestErrorMessage && (
-                <div className="p-4 bg-red-600/10 border border-red-600/20 rounded-2xl">
-                  <p className="text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">Problème détecté</p>
-                  <p className="text-sm text-red-200/90 font-medium">{requestErrorMessage}</p>
+                    <h1 className="text-2xl md:text-3xl font-black text-white tracking-tighter mb-4 leading-none uppercase">
+                      {item.title}
+                    </h1>
+                    {displayGenres.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mb-6">
+                        {displayGenres.map((genre) => (
+                          <span
+                            key={genre.id ?? genre.name}
+                            className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border border-white/10 bg-white/5 text-gray-300"
+                          >
+                            {getTmdbGenreLabel(genre)}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex flex-wrap items-center gap-6 mb-4 text-gray-400 font-bold uppercase text-xs tracking-widest">
+                      {dateLabel && (
+                        <div className="flex items-center gap-2">
+                          <Calendar size={14} className="text-blue-500" />
+                          <span>{dateLabel}</span>
+                        </div>
+                      )}
+                      <OriginPlatformLogos platforms={originPlatforms} />
+                      {item.requested_by && (
+                        <span className="flex items-center gap-2 text-blue-400/70">
+                          <CheckCircle2 size={14} />
+                          Par {item.requested_by}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {(() => {
+                    const badge = getRequestStatusBadge(item.status, item.media_type);
+                    return (
+                      <div className={`px-4 py-1.5 rounded-2xl border text-[10px] font-black uppercase tracking-widest ${badge.className}`}>
+                        {badge.label}
+                      </div>
+                    );
+                  })()}
                 </div>
-              )}
 
-              <div className="pt-6 border-t border-blue-500/10 flex flex-wrap items-center gap-4">
-                <button onClick={openSearchModal} disabled={!canManage} className="px-6 py-3 rounded-2xl bg-blue-600/10 border border-blue-500/25 text-blue-200 font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-blue-600/20 transition-all disabled:opacity-30">
-                  <Search size={16} className="text-blue-400" />Recherche Manuelle
-                </button>
-                <div className="flex-1" />
-                <button onClick={autoSearch} disabled={autoSearchLoading} className="px-8 py-3 premium-gradient rounded-2xl text-white font-black text-[10px] uppercase tracking-widest shadow-lg shadow-blue-600/20 hover:scale-[1.02] transition-all disabled:opacity-50">
-                  {autoSearchLoading ? 'Scan...' : 'Scan Automatique'}
-                </button>
-                <button onClick={() => setIsDeleteModalOpen(true)} disabled={!canManage} className="p-3 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-300 hover:bg-red-500/20 transition-all disabled:opacity-30" title="Supprimer"><Trash2 size={20} /></button>
+                <div className="space-y-2">
+                  <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Synopsis</h3>
+                  <ExpandableText text={overview || "Aucune description."} maxLines={3} className="max-w-4xl" />
+                </div>
+
+                {requestErrorMessage && (
+                  <div className="p-4 bg-red-600/10 border border-red-600/20 rounded-2xl">
+                    <p className="text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">Problème détecté</p>
+                    <p className="text-sm text-red-200/90 font-medium">{requestErrorMessage}</p>
+                  </div>
+                )}
+
+                <div className="pt-6 border-t border-blue-500/10 flex flex-wrap items-center gap-4">
+                  <button onClick={openSearchModal} disabled={!canManage} className="px-6 py-3 rounded-2xl bg-blue-600/10 border border-blue-500/25 text-blue-200 font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-blue-600/20 transition-all disabled:opacity-30">
+                    <Search size={16} className="text-blue-400" />Recherche Manuelle
+                  </button>
+                  <div className="flex-1" />
+                  <button onClick={autoSearch} disabled={autoSearchLoading} className="px-8 py-3 premium-gradient rounded-2xl text-white font-black text-[10px] uppercase tracking-widest shadow-lg shadow-blue-600/20 hover:scale-[1.02] transition-all disabled:opacity-50">
+                    {autoSearchLoading ? 'Scan...' : 'Scan Automatique'}
+                  </button>
+                  <button onClick={() => setIsDeleteModalOpen(true)} disabled={!canManage} className="p-3 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-300 hover:bg-red-500/20 transition-all disabled:opacity-30" title="Supprimer"><Trash2 size={20} /></button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
         {item.matched_torrent_name && (
-          <div className="p-6 rounded-[2rem] border border-transparent bg-white/[0.03] shadow-[0_16px_64px_rgba(37,99,235,0.12)] backdrop-blur-xl animate-premium-fade space-y-4 max-w-3xl mx-auto text-center">
+          <div className="p-6 rounded-[2rem] border border-blue-500/15 bg-white/[0.03] shadow-[0_16px_64px_rgba(37,99,235,0.12)] backdrop-blur-xl animate-premium-fade space-y-4 max-w-3xl mx-auto text-center">
             <div className="flex items-center justify-center gap-3">
               <span className="px-2.5 py-1 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[10px] font-black uppercase tracking-widest">
                 Fichier trouvé
@@ -329,28 +381,28 @@ export function RequestDetailPage() {
             </div>
           </div>
         )}
-
-        <ManualSearchModal
-          isOpen={isModalOpen}
-          onClose={closeSearchModal}
-          title="Recherche Manuelle"
-          subtitle={item.title}
-          results={results}
-          isLoading={modalLoading}
-          onDownload={downloadResult}
-          error={modalError}
-          onForceDownload={forceAvailable ? forceDownload : undefined}
-        />
-
-        <ConfirmModal
-          isOpen={isDeleteModalOpen}
-          title="Retirer du suivi ?"
-          message="Cette demande sera supprimée. La surveillance de ce média s'arrêtera."
-          confirmLabel="Supprimer"
-          onConfirm={confirmDelete}
-          onClose={() => setIsDeleteModalOpen(false)}
-        />
       </div>
+
+      <ManualSearchModal
+        isOpen={isModalOpen}
+        onClose={closeSearchModal}
+        title="Recherche Manuelle"
+        subtitle={item.title}
+        results={results}
+        isLoading={modalLoading}
+        onDownload={downloadResult}
+        error={modalError}
+        onForceDownload={forceAvailable ? forceDownload : undefined}
+      />
+
+      <ConfirmModal
+        isOpen={isDeleteModalOpen}
+        title="Retirer du suivi ?"
+        message="Cette demande sera supprimée. La surveillance de ce média s'arrêtera."
+        confirmLabel="Supprimer"
+        onConfirm={confirmDelete}
+        onClose={() => setIsDeleteModalOpen(false)}
+      />
     </div>
   );
 }

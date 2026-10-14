@@ -8,6 +8,7 @@ import {
   searchMovieHandler,
   searchTvSeriesHandler,
   searchGeneralHandler,
+  quickDownloadHandler,
   testProwlarrHandler,
 } from './handlers.js';
 
@@ -40,5 +41,12 @@ router.post('/search/tv', authenticateToken, searchTvSeriesHandler);
  * @access Private
  */
 router.post('/search', authenticateToken, searchGeneralHandler);
+
+/**
+ * @route POST /api/prowlarr/quick-download
+ * @desc Meilleur torrent (film) ou pack saison → qBit (sans créer de demande)
+ * @access Private
+ */
+router.post('/quick-download', authenticateToken, quickDownloadHandler);
 
 export default router;

@@ -65,6 +65,8 @@ export interface TvSeasonRequest {
   matched_torrent_seeds?: number | null;
   created_at: string;
   requested_by?: string | null;
+  /** Talk / Reality / News (affichage Émission) — media_type reste tv/anime. */
+  is_broadcast_episodic?: number | boolean | null;
 }
 
 /** Réponse GET /api/library/tv/:id/presence — état des épisodes sur disque / qBit. */

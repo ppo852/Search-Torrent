@@ -4,6 +4,7 @@ import { api } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { getRequestStatusBadge, aggregateSeasonStatuses } from '../lib/request-status-labels';
+import { getRequestMediaKindLabel } from '../lib/tmdb-genre-labels';
 import { EmptyState } from '../components/ui/EmptyState';
 import { RequestStatusLegend } from '../components/ui/RequestStatusLegend';
 import { showErrorToast, showToast } from '../stores/toastStore';
@@ -33,6 +34,7 @@ interface TvShowGroup {
   created_at: string;
   status: string;
   requested_by?: string | null;
+  is_broadcast_episodic?: boolean;
   seasons: TvSeasonRequest[];
 }
 
@@ -73,6 +75,7 @@ export function LibraryPage() {
       const groupedTv: TvShowGroup[] = Array.from(tvByShow.entries()).map(([key, seasons]) => {
         const sorted = [...seasons].sort((a, b) => (a.season_number || 0) - (b.season_number || 0));
         const latest = [...seasons].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+        const isBroadcast = seasons.some((s) => Boolean(s.is_broadcast_episodic));
 
         return {
           kind: 'tv_show_group' as const,
@@ -84,6 +87,7 @@ export function LibraryPage() {
           created_at: latest.created_at,
           requested_by: sorted.find((s) => s.requested_by)?.requested_by || null,
           status: aggregateSeasonStatuses(sorted.map((s) => s.status)),
+          is_broadcast_episodic: isBroadcast,
           seasons: sorted
         };
       });
@@ -278,7 +282,10 @@ export function LibraryPage() {
                     )}
                     
                     <div className="absolute top-3 left-3 px-2 py-1 bg-black/60 backdrop-blur-md rounded-lg text-[9px] font-black text-white uppercase tracking-[0.2em] border border-white/10 shadow-lg">
-                      {item.media_type === 'movie' ? 'Film' : item.media_type === 'animation' ? 'Animation' : item.media_type === 'anime' ? 'Anime' : 'Série'}
+                      {getRequestMediaKindLabel(
+                        item.media_type,
+                        item.kind === 'tv_show_group' ? item.is_broadcast_episodic : false
+                      )}
                     </div>
 
                     <div className="absolute top-3 right-3 max-w-[48%] flex justify-end">
@@ -330,7 +337,10 @@ export function LibraryPage() {
                 <div className="flex items-center gap-4 mb-2 flex-wrap">
                   <h3 className="text-white font-black text-lg uppercase tracking-tighter truncate">{item.title}</h3>
                   <span className="px-2 py-0.5 bg-blue-600/10 border border-blue-600/20 rounded-lg text-[9px] text-blue-400 uppercase font-black tracking-widest">
-                    {item.media_type}
+                    {getRequestMediaKindLabel(
+                      item.media_type,
+                      item.kind === 'tv_show_group' ? item.is_broadcast_episodic : false
+                    )}
                   </span>
                   {renderStatusBadge(item.status, item.media_type)}
                 </div>

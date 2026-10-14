@@ -35,7 +35,7 @@ export function MediaSection({
   return (
     <section className="mb-12 relative group">
       <div className="flex items-center justify-between gap-4 mb-6 pl-4 pr-4">
-        <h2 className="text-xl font-bold text-white relative before:content-[''] before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-1 before:h-6 before:bg-gradient-to-b before:from-blue-500 before:to-purple-600 before:rounded pl-4">
+        <h2 className="text-xl font-bold text-blue-400 relative before:content-[''] before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-1 before:h-6 before:bg-gradient-to-b before:from-blue-500 before:to-purple-600 before:rounded pl-4">
           {title}
         </h2>
         {seeMoreTo && (

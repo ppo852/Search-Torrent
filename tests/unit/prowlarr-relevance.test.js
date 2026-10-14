@@ -4,15 +4,41 @@ import {
   isRelevantResult,
   splitQueryTitleAndYear,
   prepareQueries,
+  hasTvSeasonOrEpisodeMarker,
 } from '../../server/services/prowlarr/search.js';
 
-test('prepareQueries — avec année : année d’abord puis titre seul (pas seulement 2× année)', () => {
+test('prepareQueries — interactive : année d’abord puis titre seul', () => {
   assert.deepEqual(prepareQueries('Villageois LVL 999', 'LV999の村人', '2026', null), [
     'LV999の村人 2026',
     'Villageois LVL 999 2026',
     'LV999の村人',
     'Villageois LVL 999',
   ]);
+});
+
+test('prepareQueries — request : année seulement, pas de titre nu', () => {
+  assert.deepEqual(
+    prepareQueries('Resident Evil', 'Resident Evil', '2026', null, {
+      includeBareWithoutQualifier: false,
+    }),
+    ['Resident Evil 2026']
+  );
+});
+
+test('prepareQueries — request saison TV : Sxx + année combinés (pas de titre nu)', () => {
+  assert.deepEqual(
+    prepareQueries('Lanterns', 'Lanterns', '2026', 1, {
+      includeBareWithoutQualifier: false,
+    }),
+    ['Lanterns S01 2026']
+  );
+  // 2 titres : les 2 slots gardent l’année (plus de perte année / Sxx seuls)
+  assert.deepEqual(
+    prepareQueries('Lanterns', 'Other Name', '2026', 1, {
+      includeBareWithoutQualifier: false,
+    }),
+    ['Other Name S01 2026', 'Lanterns S01 2026']
+  );
 });
 
 test('isRelevantResult — Street Fighter 2026 ≠ Street Fighter II The Movie', () => {
@@ -40,6 +66,55 @@ test('prepareQueries — sans année : max 2 titres', () => {
     'LV999の村人',
     'Villageois LVL 999',
   ]);
+});
+
+test('isRelevantResult — request film rejette pack série', () => {
+  assert.equal(
+    isRelevantResult(
+      'Resident.Evil.Infinite.Darkness.Season.1.COMPLETE',
+      ['Resident Evil'],
+      '2026',
+      null,
+      { rejectSeriesMarkers: true }
+    ),
+    false
+  );
+  assert.equal(
+    isRelevantResult(
+      'Resident.Evil.2026.MULTi.1080p',
+      ['Resident Evil'],
+      '2026',
+      null,
+      { rejectSeriesMarkers: true }
+    ),
+    true
+  );
+});
+
+test('isRelevantResult — film : L\'Odyssée ≠ L\'Odyssée de Céleste', () => {
+  const celeste =
+    'L.Odyssee.de.Celeste.2026.AD.VFF.1080p.WEB.EAC3.5.1.H265-GL0P';
+  assert.equal(
+    isRelevantResult(celeste, ["L'Odyssée"], '2026', null, {
+      rejectExtraTitleWords: true,
+    }),
+    false
+  );
+  assert.equal(
+    isRelevantResult(
+      'L.Odyssee.2026.MULTi.1080p.WEB',
+      ["L'Odyssée"],
+      '2026',
+      null,
+      { rejectExtraTitleWords: true }
+    ),
+    true
+  );
+});
+
+test('hasTvSeasonOrEpisodeMarker', () => {
+  assert.equal(hasTvSeasonOrEpisodeMarker('Foo.S01.1080p'), true);
+  assert.equal(hasTvSeasonOrEpisodeMarker('Foo.2026.BluRay'), false);
 });
 
 test('isRelevantResult — titre numérique 1923 ne rejette pas sur année 2022', () => {

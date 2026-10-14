@@ -51,7 +51,7 @@ function RssTrackerSection({
     <section className="mb-12 relative group">
       <div className="flex items-center justify-between gap-4 mb-6 pl-4 pr-4">
         <h2
-          className={`text-xl font-bold text-white relative before:content-[''] before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-1 before:h-6 before:rounded pl-4 ${config.accentBarClass}`}
+          className={`text-xl font-bold text-orange-400 relative before:content-[''] before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-1 before:h-6 before:rounded pl-4 ${config.accentBarClass}`}
         >
           {config.title}
         </h2>
@@ -138,7 +138,7 @@ export function RssTrackerHome() {
             Trackers
           </span>
           <div>
-            <h2 className="text-lg md:text-xl font-bold text-white">À télécharger</h2>
+            <h2 className="text-lg md:text-xl font-bold text-orange-400">À télécharger</h2>
             <p className="text-xs text-gray-500 mt-0.5">
               Sorties récentes déjà présentes sur tes flux RSS
             </p>

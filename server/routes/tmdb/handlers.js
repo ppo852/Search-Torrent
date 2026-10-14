@@ -254,11 +254,57 @@ export async function searchTmdbHandler(req, res) {
   }
 }
 
+function isPlatformOriginName(name) {
+  const n = String(name || '').trim().toLowerCase();
+  if (!n) return false;
+  if (/\bchannel\b/.test(n)) return false;
+  if (/\bnetflix\b/.test(n)) return true;
+  if (/\bamazon\b|\bprime video\b|\bamzn\b/.test(n)) return true;
+  if (/\bhbo\b/.test(n)) return true;
+  if (n === 'max' || n === 'hbo max' || n.startsWith('max ')) return true;
+  if (/\bapple(\s+tv|\+|(\s+studios)?)\b/.test(n) || n === 'apple') return true;
+  if (/\bdisney(\+|\s+plus)?\b/.test(n)) return true;
+  if (/\bparamount\+?\b/.test(n)) return true;
+  if (/\bhulu\b/.test(n)) return true;
+  if (/\bpeacock\b/.test(n)) return true;
+  if (/\bcrunchyroll\b/.test(n)) return true;
+  return false;
+}
+
+/** Créateur plateforme : networks (série) / production_companies (film). */
+function normalizeOriginPlatforms(data, mediaType) {
+  const list =
+    mediaType === 'movie'
+      ? data?.production_companies
+      : data?.networks;
+  if (!Array.isArray(list)) return [];
+
+  const seen = new Set();
+  const out = [];
+  for (const item of list) {
+    const id = Number(item?.id);
+    const name = String(item?.name || '').trim();
+    if (!Number.isFinite(id) || id <= 0 || !name || seen.has(id)) continue;
+    if (!isPlatformOriginName(name)) continue;
+    seen.add(id);
+    out.push({
+      id,
+      name,
+      logoPath: item?.logo_path ? String(item.logo_path) : null,
+    });
+  }
+  return out;
+}
+
 export async function getMovieDetailsHandler(req, res) {
   try {
     const data = await fetchTmdb(`/movie/${req.params.id}`, { language: 'fr-FR' });
     const videos = await fetchVideosForMedia('movie', req.params.id);
-    res.json({ ...data, videos });
+    res.json({
+      ...data,
+      videos,
+      originPlatforms: normalizeOriginPlatforms(data, 'movie'),
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erreur serveur';
     const status = message.includes('token manquant') ? 503 : 500;
@@ -270,7 +316,11 @@ export async function getTvDetailsHandler(req, res) {
   try {
     const data = await fetchTmdb(`/tv/${req.params.id}`, { language: 'fr-FR' });
     const videos = await fetchVideosForMedia('tv', req.params.id);
-    res.json({ ...data, videos });
+    res.json({
+      ...data,
+      videos,
+      originPlatforms: normalizeOriginPlatforms(data, 'tv'),
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erreur serveur';
     const status = message.includes('token manquant') ? 503 : 500;

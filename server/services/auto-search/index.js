@@ -2,7 +2,10 @@ import { get, query, run } from '../core/db.js';
 import { getSetting, resolveMinSeeds } from '../settings/index.js';
 import qBittorrentService from '../qbittorrent/index.js';
 import mediaInventoryService from '../media-inventory/index.js';
-import prowlarrSearchService, { isCompleteSeasonTitle } from '../prowlarr/search.js';
+import prowlarrSearchService, {
+  isCompleteSeasonTitle,
+  SEARCH_MODE,
+} from '../prowlarr/search.js';
 import {
   loadAssignedQualityProfile,
   isMovieLikeMediaType
@@ -31,7 +34,8 @@ import {
 import { inferQbitCategoryFromMediaType } from '../utils/qbit-categories.js';
 import logger from '../core/logger.js';
 
-async function getAutoSearchContext(mediaType) {
+/** Contexte commun auto-search + quick-download interactif. */
+export async function getAutoSearchContext(mediaType) {
   const minSeeds = await resolveMinSeeds();
   const profiles = await getSetting('quality_profiles');
   const assignments = await getSetting('quality_profile_assignments');
@@ -210,6 +214,7 @@ export async function runAutoSearchForRequest({ requestId, userId }) {
       mediaType: requestItem.media_type,
       minSeeds,
       qualityProfile: profile,
+      searchMode: SEARCH_MODE.REQUEST,
     });
 
     const best = results[0] || null;
@@ -312,7 +317,8 @@ export async function runAutoSearchForTvSeasonRequest({ requestId, userId, recon
         seasonNumber: requestItem.season_number,
         minSeeds,
         qualityProfile: profile,
-        episodeCount: allEpisodes.length
+        episodeCount: allEpisodes.length,
+        searchMode: SEARCH_MODE.REQUEST,
       });
       bestPack = packResults.filter(r => isCompleteSeasonTitle(r.name))[0];
     }
